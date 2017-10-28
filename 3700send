@@ -66,6 +66,18 @@ def calc_rto(sent, acked):
     sock.settimeout(RTO)
 
 
+def check_timeout():
+    global RTO, cwnd, ssthresh, dup_acks_count, unacked_packets
+    # first entry in unacked_packets was sent first, so its timeout will occur first
+    unacked = unacked_packets[0]
+    diff = datetime.timedelta(datetime.datetime.now() - unacked[1])
+    if diff.seconds + diff.microseconds/1000000 >= RTO:
+        log("[timeout] ACK " + unacked[0]) # timed out waiting for ack from receiver
+        ssthresh = cwnd / 2
+        cwnd = 1
+        dup_acks_count = 0
+
+
 def send_next_packet():
     global SEQUENCE, ACK, unacked_packets
 
@@ -105,11 +117,16 @@ while True:
             if sent_time is not None: # not a duplicate ACK
                 log("[recv ack] " + str(ack_num))
 
-                # update RTO if not retransmitted packet ACK
+                # update cwnd and RTO if not retransmitted packet ACK
                 # (retransmitted packets should have value set to 0)
                 if sent_time is not 0:
                     calc_rto(unacked_packets[ack_num], ack_time)
                     del unacked_packets[ack_num] # remove acked packet from unacked_packets
+
+                    if cwnd < ssthresh: # slow start
+                        cwnd += 1
+                    else: # congestion avoidance
+                        cwnd += 1 / cwnd
 
 
                 # Try to send next packet; break if no more data
@@ -123,6 +140,9 @@ while True:
                     # TODO: fast retransmit
                     log("[dup ack]" + ack_num)
 
+
+            # replace with thread for monitoring timeouts?
+            check_timeout()
 
         except (ValueError, KeyError, TypeError):
             log("[recv corrupt packet]")

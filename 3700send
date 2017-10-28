@@ -1,20 +1,34 @@
-#!/usr/bin/python -u
-#
-# CS3700, Spring 2015
-# Project 2 Starter Code
-#
-
 import sys
 import socket
 import time
 import datetime
 import select
 import json
+from random import randint
+from collections import OrderedDict
 
-MSG_SIZE = 1500
-DATA_SIZE = 1000
-TIMEOUT = 30
-SEQUENCE = 0
+alpha = 0.875
+MTU = 1500
+MSS = 1500 - 2*sys.getsizeof(int()) - 3*sys.getsizeof(bool())   # MTU - header fields
+
+RTT = None  # set initial value during connection setup
+RTO = 3     # initially 3 seconds, recalculated after first RTT
+
+SEQUENCE = randint(0, 2^32)
+ACK = None # receiver's corresponding sequence number set during connection setup
+
+cwnd = 1                    # congestion window
+adv_wnd = 4                 # receiver advertised window (TODO: set in connection setup)
+ssthresh = adv_wnd          # threshold size (used to update cwnd)
+wnd = min(cwnd, adv_wnd)
+
+# OrderedDict[(unACKed packet's SEQ number, time sent)] sorted by chronological sent times
+# used for RTT sampling, RTO, and receiving out-of-order ACKs
+#   - each time packet sent, add (seq#, time sent); TODO: if packet retransmitted, set value to 0
+#   - when ACK received, record time received, calc_rto(unacked_packets[ack#], time received), remove ack# from dict
+unacked_packets = OrderedDict([])
+dup_acks_count = 0 # retransmit at 2 (meaning 3 of the same ACKs were received)
+
 
 # Bind to localhost and an ephemeral port
 IP_PORT = sys.argv[1]
@@ -23,53 +37,98 @@ UDP_PORT = int(IP_PORT[IP_PORT.find(":")+1:])
 dest = (UDP_IP, UDP_PORT)
 
 # Set up the socket
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) 
-sock.settimeout(TIMEOUT)
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+# initial RTO 3 seconds
+sock.settimeout(RTO)
 
 def log(string):
-  sys.stderr.write(datetime.datetime.now().strftime("%H:%M:%S.%f") + " " + string + "\n")
+    sys.stderr.write(datetime.datetime.now().strftime("%H:%M:%S.%f") + " " + string + "\n")
+
+'''
+Packet Format: (NOTE: if bool field not included, assume False)
+    - seq_num
+    - ack_num
+    - ack (bool)
+    - syn (bool)
+    - fin (bool)
+    - data
+'''
+
+# recalculate RTO given the times a packet was sent and when its ACK was received
+# sent and acked are datetime objects
+def calc_rto(sent, acked):
+    global RTT, RTO
+    diff = datetime.timedelta(sent - acked)
+    sample = diff.seconds + diff.microseconds/1000000
+
+    RTT = alpha * RTT + (1 - alpha) * sample
+    RTO = 2 * RTT
+    sock.settimeout(RTO)
+
 
 def send_next_packet():
-  global SEQUENCE
+    global SEQUENCE, ACK, unacked_packets
 
-  data = sys.stdin.read(DATA_SIZE)
-  if (len(data) > 0):
-    msg = json.dumps({"sequence": SEQUENCE, "data": data, "ack": False, "eof": False})
-    SEQUENCE += len(data)
+    data = sys.stdin.read(MSS)
+    if (len(data) > 0):
+        msg = json.dumps({"seq_num": SEQUENCE, "ack_num": ACK, "data": data})
+        SEQUENCE += len(data)
+        unacked_packets[SEQUENCE] = datetime.datetime.now()
 
-    if sock.sendto(msg, dest) < len(msg):
-      log("[error] unable to fully send packet")
+        if sock.sendto(msg, dest) < len(msg):
+            log("[error] unable to fully send packet")
+        else:
+            log("[send data] " + str(SEQUENCE) + " (" + str(len(data)) + ")")
+        return True
     else:
-      log("[send data] " + str(SEQUENCE) + " (" + str(len(data)) + ")")
-    return True
-  else:
-    return False
+        return False
+
 
 # Send first packet
 send_next_packet()
 
 # Now read in data, send packets
 while True:
-  log("ABOUT TO SLEEP")
-  result = sock.recvfrom(MSG_SIZE)
+    log("ABOUT TO SLEEP")
+    result = sock.recvfrom(MTU)
 
-  if result:
-    (data, addr) = result
-    try:
-      decoded = json.loads(data)
+    if result:
+        ack_time = datetime.datetime.now()
+        (data, addr) = result
+        try:
+            decoded = json.loads(data)
 
-      # If there is an ack, send next packet
-      if decoded['ack'] == SEQUENCE:
-        log("[recv ack] " + str(SEQUENCE))
+            # If there is an ack, process that ACK (duplicate? retransmit? send next packet?)
+            ack_num = decoded['ack_num']
+            sent_time = unacked_packets.get(ack_num, None)
 
-        # Try to send next packet; break if no more data
-        if (not send_next_packet()):
-          break
-    except (ValueError, KeyError, TypeError):
-      log("[recv corrupt packet]")
-  else:
-    log("[error] timeout")
-    sys.exit(-1)
+            if sent_time is not None: # not a duplicate ACK
+                log("[recv ack] " + str(ack_num))
+
+                # update RTO if not retransmitted packet ACK
+                # (retransmitted packets should have value set to 0)
+                if sent_time is not 0:
+                    calc_rto(unacked_packets[ack_num], ack_time)
+                    del unacked_packets[ack_num] # remove acked packet from unacked_packets
+
+
+                # Try to send next packet; break if no more data
+                if (not send_next_packet()):
+                    break
+
+            # packet matching ACK not in unacked_packets ==> duplicate ACK
+            else:
+                dup_acks_count += 1
+                if dup_acks_count == 2:
+                    # TODO: fast retransmit
+                    log("[dup ack]" + ack_num)
+
+
+        except (ValueError, KeyError, TypeError):
+            log("[recv corrupt packet]")
+    else:
+        log("[error] timeout")
+        sys.exit(-1)
 
 sock.sendto(json.dumps({"eof": True, "data": "", "sequence": SEQUENCE, "ack": False}), dest)
 sys.exit(0)

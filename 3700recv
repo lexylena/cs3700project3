@@ -30,6 +30,9 @@ sock.settimeout(TIMEOUT)
 UDP_PORT = sock.getsockname()[1]
 log("[bound] " + str(UDP_PORT))
 
+#Next expected sequence number
+expected_sequence = 0
+
 # Now listen for packets
 while True:
   result = sock.recvfrom(MSG_SIZE)
@@ -46,18 +49,37 @@ while True:
         log("[completed]")
         sys.exit(0)
 
+      if (decoded['syn']):
+	log("Starting connection...")
+	msg = json.dumps({"syn": True, "ack": True, "sequence": decoded['sequence']+1})
+	sock.sendto(msg, addr)
+
+      if (decoded['ack']):
+	log("Connection established")
+	#Sequence number needs to be senders +1
+	msg = json.dumps({"syn": False, "ack": decoded['sequence']+1, "eof": False, "data": ""})
+	sock.sendto(msg,addr)
+	expected_sequence = decoded['sequence']+1
       # If there is data, we accept it and print it out
       if (decoded['data']):
-        # If we receive data, we assume it's in-order
-        # You will need to do much more here
-        log("[recv data] " + str(decoded['sequence']) + " (" + str(len(decoded['data'])) + ") ACCEPTED (in-order)")
-        sys.stdout.write(decoded['data'])
+		if decoded['sequence'] == expected_sequence:
+			log("[recv data] " + str(decoded['sequence']) + " (" + str(len(decoded['data'])) + ") ACCEPTED (in-order)")
+			sys.stdout.write(decoded['data'])
+			expected_sequence += len(decoded['data'])
+			log("expected next sequence" + str(expected_sequence))
+			msg = json.dumps({"ack": decoded['sequence'] + len(decoded['data']), "syn": False})
+			log("About to send " + msg)
+			if sock.sendto(msg, addr) < len(msg):
+				log("[error] unable to fully send packet")
+		else:
+			log("Unexpected seq num")
+		#	Send ACK for expected seq
 
       # Send back an ack to the sender
-      msg = json.dumps({"ack": decoded['sequence'] + len(decoded['data'])})
-      log("ABOUT TO SEND " + msg)
-      if sock.sendto(msg, addr) < len(msg):
-        log("[error] unable to fully send packet")
+      #msg = json.dumps({"ack": decoded['sequence'] + len(decoded['data']), "syn": False})
+      #log("ABOUT TO SEND " + msg)
+      #if sock.sendto(msg, addr) < len(msg):
+      #  log("[error] unable to fully send packet")
 
     except (ValueError, KeyError, TypeError) as e:
       log("[recv corrupt packet]")

@@ -10,7 +10,7 @@ import time
 import datetime
 import select
 import json
-
+import random
 MSG_SIZE = 1500
 DATA_SIZE = 1000
 TIMEOUT = 30
@@ -34,7 +34,8 @@ def send_next_packet():
 
   data = sys.stdin.read(DATA_SIZE)
   if (len(data) > 0):
-    msg = json.dumps({"sequence": SEQUENCE, "data": data, "ack": False, "eof": False})
+    log("Sequence sent" + str(SEQUENCE))
+    msg = json.dumps({"sequence": SEQUENCE, "data": data, "ack": False, "eof": False, "syn": False})
     SEQUENCE += len(data)
 
     if sock.sendto(msg, dest) < len(msg):
@@ -46,7 +47,11 @@ def send_next_packet():
     return False
 
 # Send first packet
-send_next_packet()
+SEQUENCE = random.randint(0, 10)
+msg = json.dumps({"syn": True, "sequence": SEQUENCE, "data": "", "ack": False, "eof": False})
+log("About to send Syn")
+sock.sendto(msg, dest)
+#send_next_packet()
 
 # Now read in data, send packets
 while True:
@@ -57,8 +62,14 @@ while True:
     (data, addr) = result
     try:
       decoded = json.loads(data)
+      if (decoded['syn'] and decoded['ack']):
+	log("Connection establishing")
+	msg = json.dumps({"ack": True, "syn": False, "eof": False, "data": "", "sequence": SEQUENCE})
+	sock.sendto(msg, dest)
+	SEQUENCE += 1
 
-      # If there is an ack, send next packet
+     #Add if to handle sequence +1 
+	#If there is a lone ack, with the expected number, send the next packet
       if decoded['ack'] == SEQUENCE:
         log("[recv ack] " + str(SEQUENCE))
 
@@ -71,5 +82,5 @@ while True:
     log("[error] timeout")
     sys.exit(-1)
 
-sock.sendto(json.dumps({"eof": True, "data": "", "sequence": SEQUENCE, "ack": False}), dest)
+sock.sendto(json.dumps({"eof": True, "data": "", "sequence": SEQUENCE, "ack": False, "syn": False}), dest)
 sys.exit(0)

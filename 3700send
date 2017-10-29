@@ -74,7 +74,7 @@ def check_timeout():
     global RTO, cwnd, ssthresh, dup_acks_count, unacked_packets
     # first entry in unacked_packets was sent first, so its timeout will occur first
     unacked = unacked_packets.items()[0]
-    diff = datetime.datetime.now() - unacked[1]
+    diff = datetime.datetime.now() - unacked[1][0]
     if diff.seconds + diff.microseconds/1000000 >= RTO:
         log("[timeout] ACK " + unacked[0]) # timed out waiting for ack from receiver
         ssthresh = cwnd / 2
@@ -159,7 +159,7 @@ while True:
                     # update cwnd and RTO if not retransmitted packet ACK
                     # (retransmitted packets should have value set to 0)
                     if sent_time is not 0:
-                        calc_rto(unacked_packets[ack_num], ack_time)
+                        calc_rto(unacked_packets[ack_num][0], ack_time)
                         del unacked_packets[ack_num] # remove acked packet from unacked_packets
 
                         if cwnd < ssthresh: # slow start

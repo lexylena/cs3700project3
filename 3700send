@@ -83,15 +83,21 @@ def check_timeout():
 
 
 def send_next_packet():
-    global SEQUENCE, ACK, unacked_packets
+    global SEQUENCE, unacked_packets
 
-    data = sys.stdin.read(MSS)
+    retransmit = unacked_packets.get(SEQUENCE, None)
+    if retransmit:
+        data = retransmit[1]
+        unacked_packets[SEQUENCE][0] = 0
+    else:
+        data = sys.stdin.read(MSS)
+
     if (len(data) > 0):
         msg = json.dumps({"seq_num": SEQUENCE, "data": data, "fin": False,
                           "syn": False, "ack": False})
         log("Sequence sent" + str(SEQUENCE))
         SEQUENCE += len(data)
-        unacked_packets[SEQUENCE] = datetime.datetime.now()
+        unacked_packets[SEQUENCE] = (datetime.datetime.now(), data)
 
         if sock.sendto(msg, dest) < len(msg):
             log("[error] unable to fully send packet")
@@ -100,6 +106,24 @@ def send_next_packet():
         return True
     else:
         return False
+
+
+def fast_retransmit(ack_num):
+    global cwnd, ssthresh, unacked_packets, dup_acks_count, SEQUENCE
+
+    packet = unacked_packets[ack_num]
+    msg = json.dumps({"seq_num": ack_num, "data": packet[1], "fin": False,
+                      "syn": False, "ack": False})
+    log("[retransmission] packet " + str(ack_num))
+    if sock.sendto(msg, dest) < len(msg):
+        log("[error] unable to fully send packet")
+
+    SEQUENCE = ack_num + len(packet[1])     # reset SEQUENCE to last missing packet
+    unacked_packets[ack_num][0] = 0         # set packet's sent time to 0 (exclude from RTT sampling)
+
+    # fast recovery
+    cwnd = ssthresh / 2
+    dup_acks_count = 0
 
 
 # Send first packet
@@ -154,6 +178,7 @@ while True:
                     if dup_acks_count == 2:
                         # TODO: fast retransmit
                         log("[dup ack]" + ack_num)
+                        fast_retransmit(ack_num)
 
 
             # replace with thread for monitoring timeouts?

@@ -64,7 +64,7 @@ Packet Format: (NOTE: if bool field not included, assume False)
 # sent and acked are datetime objects
 def calc_rto(sent, acked):
     global RTT, RTO
-    diff = datetime.timedelta(sent - acked)
+    diff = sent - acked
     sample = diff.seconds + diff.microseconds/1000000
 
     RTT = alpha * RTT + (1 - alpha) * sample
@@ -89,7 +89,7 @@ def send_next_packet():
 
     data = sys.stdin.read(MSS)
     if (len(data) > 0):
-        msg = json.dumps({"seq_num": SEQUENCE, "ack_num": ACK, "data": data})
+        msg = json.dumps({"seq_num": SEQUENCE, "ack_num": ACK, "data": data, "eof": False})
         SEQUENCE += len(data)
         unacked_packets[SEQUENCE] = datetime.datetime.now()
 
@@ -150,7 +150,7 @@ while True:
             # replace with thread for monitoring timeouts?
             check_timeout()
 
-        except (ValueError, KeyError, TypeError):
+        except ('''ValueError, KeyError, TypeError'''):
             log("[recv corrupt packet]")
     else:
         log("[error] timeout")

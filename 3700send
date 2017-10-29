@@ -17,7 +17,7 @@ alpha = 0.875
 MTU = 1500
 MSS = 1500 - 2*sys.getsizeof(int()) - 3*sys.getsizeof(bool())   # MTU - header fields
 
-RTT = None  # set initial value during connection setup
+RTT = 1  # TODO: set initial value during connection setup
 RTO = 3     # initially 3 seconds, recalculated after first RTT
 
 SEQUENCE = randint(0, 10)
@@ -73,7 +73,7 @@ def calc_rto(sent, acked):
 def check_timeout():
     global RTO, cwnd, ssthresh, dup_acks_count, unacked_packets
     # first entry in unacked_packets was sent first, so its timeout will occur first
-    unacked = unacked_packets[0]
+    unacked = unacked_packets.items()[0]
     diff = datetime.datetime.now() - unacked[1]
     if diff.seconds + diff.microseconds/1000000 >= RTO:
         log("[timeout] ACK " + unacked[0]) # timed out waiting for ack from receiver

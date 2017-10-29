@@ -74,7 +74,7 @@ def check_timeout():
     global RTO, cwnd, ssthresh, dup_acks_count, unacked_packets
     # first entry in unacked_packets was sent first, so its timeout will occur first
     unacked = unacked_packets[0]
-    diff = datetime.timedelta(datetime.datetime.now() - unacked[1])
+    diff = datetime.datetime.now() - unacked[1]
     if diff.seconds + diff.microseconds/1000000 >= RTO:
         log("[timeout] ACK " + unacked[0]) # timed out waiting for ack from receiver
         ssthresh = cwnd / 2
@@ -87,7 +87,8 @@ def send_next_packet():
 
     data = sys.stdin.read(MSS)
     if (len(data) > 0):
-        msg = json.dumps({"seq_num": SEQUENCE, "data": data, "fin": False})
+        msg = json.dumps({"seq_num": SEQUENCE, "data": data, "fin": False,
+                          "syn": False, "ack": False})
         log("Sequence sent" + str(SEQUENCE))
         SEQUENCE += len(data)
         unacked_packets[SEQUENCE] = datetime.datetime.now()
@@ -102,7 +103,7 @@ def send_next_packet():
 
 
 # Send first packet
-msg = json.dumps({"syn": True, "seq_num": SEQUENCE, "data": "", "fin": False})
+msg = json.dumps({"syn": True, "seq_num": SEQUENCE, "data": "", "fin": False, "ack": False})
 log("About to send Syn")
 sock.sendto(msg, dest)
 

@@ -71,7 +71,7 @@ def calc_rto(sent, acked):
 
 
 def check_timeout():
-    global RTO, cwnd, ssthresh, dup_acks_count, unacked_packets
+    global RTO, cwnd, ssthresh, dup_acks_count, unacked_packets, SEQUENCE
     # first entry in unacked_packets was sent first, so its timeout will occur first
     unacked = unacked_packets.items()[0]
     diff = datetime.datetime.now() - unacked[1][0]
@@ -80,37 +80,39 @@ def check_timeout():
         ssthresh = cwnd / 2
         cwnd = 1
         dup_acks_count = 0
-	log(str(unacked[1][1]))
-	msg = json.dumps({"seq_num": (unacked[0] - len(unacked[1][1])) , "data": unacked[1][1], "fin": False, "syn": False})
-	SEQUENCE = unacked[0]
-	if sock.sendto(msg, dest) < len(msg):
-		log("[error] unable to fully send packet")
+        msg = json.dumps({"seq_num": (unacked[0] - len(unacked[1][1])) , "data": unacked[1][1], "fin": False, "syn": False})
+        SEQUENCE = unacked[0]
+        if sock.sendto(msg, dest) < len(msg):
+            log("[error] unable to fully send packet")
 
 
 def send_next_packet():
     global SEQUENCE, unacked_packets
 
-    retransmit = unacked_packets.get(SEQUENCE, None)
-    if retransmit:
-        data = retransmit[1]
-        unacked_packets[SEQUENCE][0] = 0
-    else:
-        data = sys.stdin.read(MSS)
-
-    if (len(data) > 0):
-        msg = json.dumps({"seq_num": SEQUENCE, "data": data, "fin": False,
-                          "syn": False, "ack": False})
-        log("Sequence sent" + str(SEQUENCE))
-        SEQUENCE += len(data)
-        unacked_packets[SEQUENCE] = (datetime.datetime.now(), data)
-
-        if sock.sendto(msg, dest) < len(msg):
-            log("[error] unable to fully send packet")
+    if (wnd >= 1):
+        retransmit = unacked_packets.get(SEQUENCE, None)
+        if retransmit:
+            data = retransmit[1]
+            unacked_packets[SEQUENCE][0] = 0
         else:
-            log("[send data] " + str(SEQUENCE) + " (" + str(len(data)) + ")")
-        return True
+            data = sys.stdin.read(MSS)
+
+        if (len(data) > 0):
+            msg = json.dumps({"seq_num": SEQUENCE, "data": data, "fin": False,
+                              "syn": False, "ack": False})
+            log("Sequence sent" + str(SEQUENCE))
+            SEQUENCE += len(data)
+            unacked_packets[SEQUENCE] = (datetime.datetime.now(), data)
+
+            if sock.sendto(msg, dest) < len(msg):
+                log("[error] unable to fully send packet")
+            else:
+                log("[send data] " + str(SEQUENCE) + " (" + str(len(data)) + ")")
+            return True
+        else:
+            return False
     else:
-        return False
+        return True
 
 
 def fast_retransmit(ack_num):

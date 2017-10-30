@@ -27,10 +27,11 @@ cwnd = 1                    # congestion window
 adv_wnd = 4                 # receiver advertised window (TODO: set in connection setup)
 ssthresh = adv_wnd          # threshold size (used to update cwnd)
 wnd = min(cwnd, adv_wnd)
+eff_wnd = wnd # TODO: implement eff_wnd use
 
 # OrderedDict[(unACKed packet's SEQ number, time sent)] sorted by chronological sent times
 # used for RTT sampling, RTO, and receiving out-of-order ACKs
-#   - each time packet sent, add (seq#, time sent); TODO: if packet retransmitted, set value to 0
+#   - each time packet sent, add (seq#, time sent)
 #   - when ACK received, record time received, calc_rto(unacked_packets[ack#], time received), remove ack# from dict
 unacked_packets = OrderedDict([])
 dup_acks_count = 0 # retransmit at 2 (meaning 3 of the same ACKs were received)
@@ -43,8 +44,9 @@ dest = (UDP_IP, UDP_PORT)
 
 # Set up the socket
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-# initial RTO 3 seconds
+sock.setblocking(0)
 sock.settimeout(30)
+
 
 def log(string):
     sys.stderr.write(datetime.datetime.now().strftime("%H:%M:%S.%f") + " " + string + "\n")
@@ -63,38 +65,50 @@ Sender Packet Format:
 def calc_rto(sent, acked):
     global RTT, RTO
     diff = acked - sent
-    log("calc_rto diff = " + str(diff))
+    # log("calc_rto diff = " + str(diff))
     sample =diff.seconds + diff.microseconds/float(1000000)
-    log("calc_rto sample = " + str(sample))
+    # log("calc_rto sample = " + str(sample))
     RTT = alpha * RTT + (1 - alpha) * sample
-    log("calc_rto rtt = " + str(RTT))
-    RTO = 2 * RTT #TODO set back
-    #sock.settimeout(RTO)
+    # log("calc_rto rtt = " + str(RTT))
+    RTO = 2 * RTT
 
+# TODO: implement
+def retransmit_after_timeout():
+    return 0
 
+#TODO: change implementation to call retransmit_after_timeout
+# check timeouts for unacked packets
+# resend packet if timed out and return true
+# if no timeouts, return false
 def check_timeout():
     global RTO, cwnd, ssthresh, dup_acks_count, unacked_packets, SEQUENCE
     # first entry in unacked_packets was sent first, so its timeout will occur first
     unacked = unacked_packets.items()[0]
     diff = datetime.datetime.now() - unacked[1][0]
-    log("check_timeout")
-    log("diff = " +  str(diff))
-    log("RTO = " + str(RTO))
+    # log("check_timeout")
+    # log("diff = " +  str(diff))
+    # log("RTO = " + str(RTO))
     if diff.seconds + diff.microseconds/1000000 >= RTO:
         log("[timeout] ACK " + str(unacked[0])) # timed out waiting for ack from receiver
         ssthresh = cwnd / 2
         cwnd = 1
         dup_acks_count = 0
-        msg = json.dumps({"seq_num": (unacked[0] - len(unacked[1][1])) , "data": unacked[1][1], "fin": False, "syn": False})
+        msg = json.dumps({"seq_num": (unacked[0] - len(unacked[1][1])) ,
+                          "data": unacked[1][1], "fin": False,
+                          "syn": False, "ack": False})
         SEQUENCE = unacked[0]
         if sock.sendto(msg, dest) < len(msg):
             log("[error] unable to fully send packet")
+        return True
+
+    else:
+        return False
 
 
 def send_next_packet():
-    global SEQUENCE, unacked_packets
+    global SEQUENCE, unacked_packets, eff_wnd
 
-    if (wnd >= 1):
+    if (eff_wnd >= 1):
         retransmit = unacked_packets.get(SEQUENCE, None)
         if retransmit:
             data = retransmit[1]
@@ -146,11 +160,11 @@ sock.sendto(msg, dest)
 
 # Now read in data, send packets
 while True:
-    check_timeout()
     log("ABOUT TO SLEEP")
-    result = sock.recvfrom(MTU)
-
-    if result:
+    ready = select.select([sock], [], [], RTO)
+    if ready[0]:
+        # result = sock.recvfrom(MTU)
+        result = ready[0].recv(MTU)
         ack_time = datetime.datetime.now()
         (data, addr) = result
         try:
@@ -158,8 +172,10 @@ while True:
 
             if decoded['syn']:
                 log("Connection establishing")
-                SEQUENCE += 1
+                # TODO: handle wrong syn packet?
                 if decoded['ack'] == SEQUENCE:
+                    SEQUENCE += 1
+                    calc_rto(unacked_packets[decoded['ack']][0], ack_time)
                     send_next_packet()
 
             else:
@@ -167,6 +183,7 @@ while True:
                 ack_num = decoded['ack']
                 sent_time = unacked_packets.get(ack_num, None)
 
+                # TODO: fix where cwnd adjustment is? should adjust whenever any ACK is received? or just new ACKs?
                 if sent_time is not None: # not a duplicate ACK
                     log("[recv ack] " + str(ack_num))
 
@@ -189,8 +206,9 @@ while True:
                 # packet matching ACK not in unacked_packets ==> duplicate ACK
                 else:
                     dup_acks_count += 1
-                    if dup_acks_count == 2:
-                        # TODO: fast retransmit
+                    if dup_acks_count < 2:
+                        check_timeout()
+                    else: # received 3 duplicate ACKs
                         log("[dup ack]" + ack_num)
                         fast_retransmit(ack_num)
 
@@ -201,8 +219,9 @@ while True:
         except ('''ValueError, KeyError, TypeError'''):
             log("[recv corrupt packet]")
     else:
-        log("[error] timeout")
-        sys.exit(-1)
+        # TODO: implement
+        retransmit_after_timeout()
 
+#TODO: implement connection tear down
 sock.sendto(json.dumps({"fin": True, "data": "", "seq_num": SEQUENCE, "ack": False, "syn": False}), dest)
 sys.exit(0)

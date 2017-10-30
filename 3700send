@@ -44,7 +44,7 @@ dest = (UDP_IP, UDP_PORT)
 # Set up the socket
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 # initial RTO 3 seconds
-sock.settimeout(RTO)
+sock.settimeout(30)
 
 def log(string):
     sys.stderr.write(datetime.datetime.now().strftime("%H:%M:%S.%f") + " " + string + "\n")
@@ -62,12 +62,14 @@ Sender Packet Format:
 # sent and acked are datetime objects
 def calc_rto(sent, acked):
     global RTT, RTO
-    diff = sent - acked
-    sample = diff.seconds + diff.microseconds/1000000
-
+    diff = acked - sent
+    log("calc_rto diff = " + str(diff))
+    sample =diff.seconds + diff.microseconds/float(1000000)
+    log("calc_rto sample = " + str(sample))
     RTT = alpha * RTT + (1 - alpha) * sample
-    RTO = 0#2 * RTT TODO set back
-    sock.settimeout(RTO)
+    log("calc_rto rtt = " + str(RTT))
+    RTO = 2 * RTT #TODO set back
+    #sock.settimeout(RTO)
 
 
 def check_timeout():
@@ -75,6 +77,9 @@ def check_timeout():
     # first entry in unacked_packets was sent first, so its timeout will occur first
     unacked = unacked_packets.items()[0]
     diff = datetime.datetime.now() - unacked[1][0]
+    log("check_timeout")
+    log("diff = " +  str(diff))
+    log("RTO = " + str(RTO))
     if diff.seconds + diff.microseconds/1000000 >= RTO:
         log("[timeout] ACK " + str(unacked[0])) # timed out waiting for ack from receiver
         ssthresh = cwnd / 2

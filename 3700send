@@ -15,7 +15,7 @@ from collections import OrderedDict
 
 alpha = 0.875
 MTU = 1500
-MSS = 1500 - 2*sys.getsizeof(int()) - 3*sys.getsizeof(bool())   # MTU - header fields
+MSS = 1000 #1500 - 2*sys.getsizeof(int()) - 3*sys.getsizeof(bool())   # MTU - header fields TODO uncomment
 
 RTT = 1  # TODO: set initial value during connection setup
 RTO = 3     # initially 3 seconds, recalculated after first RTT
@@ -66,7 +66,7 @@ def calc_rto(sent, acked):
     sample = diff.seconds + diff.microseconds/1000000
 
     RTT = alpha * RTT + (1 - alpha) * sample
-    RTO = 2 * RTT
+    RTO = 0#2 * RTT TODO set back
     sock.settimeout(RTO)
 
 
@@ -76,10 +76,15 @@ def check_timeout():
     unacked = unacked_packets.items()[0]
     diff = datetime.datetime.now() - unacked[1][0]
     if diff.seconds + diff.microseconds/1000000 >= RTO:
-        log("[timeout] ACK " + unacked[0]) # timed out waiting for ack from receiver
+        log("[timeout] ACK " + str(unacked[0])) # timed out waiting for ack from receiver
         ssthresh = cwnd / 2
         cwnd = 1
         dup_acks_count = 0
+	log(str(unacked[1][1]))
+	msg = json.dumps({"seq_num": (unacked[0] - len(unacked[1][1])) , "data": unacked[1][1], "fin": False, "syn": False})
+	SEQUENCE = unacked[0]
+	if sock.sendto(msg, dest) < len(msg):
+		log("[error] unable to fully send packet")
 
 
 def send_next_packet():
@@ -129,10 +134,12 @@ def fast_retransmit(ack_num):
 # Send first packet
 msg = json.dumps({"syn": True, "seq_num": SEQUENCE, "data": "", "fin": False, "ack": False})
 log("About to send Syn")
+unacked_packets[SEQUENCE] = (datetime.datetime.now(), "")
 sock.sendto(msg, dest)
 
 # Now read in data, send packets
 while True:
+    check_timeout()
     log("ABOUT TO SLEEP")
     result = sock.recvfrom(MTU)
 
@@ -182,7 +189,7 @@ while True:
 
 
             # replace with thread for monitoring timeouts?
-            check_timeout()
+            #check_timeout()
 
         except ('''ValueError, KeyError, TypeError'''):
             log("[recv corrupt packet]")

@@ -12,6 +12,7 @@ import select
 import json
 from random import randint
 from collections import OrderedDict
+import time
 
 alpha = 0.875
 MTU = 1500
@@ -85,11 +86,13 @@ def check_timeout():
         ssthresh = cwnd / 2
         cwnd = 1
         dup_acks_count = 0
-        msg = json.dumps({"seq_num": (unacked[0] - len(unacked[1][1])) , "data": unacked[1][1], "fin": False, "syn": False})
+	log("unacked items " + str(unacked_packets.items()))
+        msg = json.dumps({"seq_num": unacked[0], "data": unacked[1][1], "fin": False, "syn": False})
         SEQUENCE = unacked[0]
+	log("data to resend " + str(unacked[1][1]))
+	log("About to send " + str(msg))
         if sock.sendto(msg, dest) < len(msg):
             log("[error] unable to fully send packet")
-
 
 def send_next_packet():
     global SEQUENCE, unacked_packets
@@ -98,7 +101,8 @@ def send_next_packet():
         retransmit = unacked_packets.get(SEQUENCE, None)
         if retransmit:
             data = retransmit[1]
-            unacked_packets[SEQUENCE][0] = 0
+	    #log("unackedpackets[seq][0]" + str(unacked_packets[SEQUENCE][0]))
+            #unacked_packets[SEQUENCE][0] = 0 TODO: Cannot assign value to tuple in this way
         else:
             data = sys.stdin.read(MSS)
 
@@ -123,7 +127,7 @@ def send_next_packet():
 def fast_retransmit(ack_num):
     global cwnd, ssthresh, unacked_packets, dup_acks_count, SEQUENCE
 
-    packet = unacked_packets[ack_num]
+    packet = unacked_packets[ack_num] #TODO: This throws a keyerror
     msg = json.dumps({"seq_num": ack_num, "data": packet[1], "fin": False,
                       "syn": False, "ack": False})
     log("[retransmission] packet " + str(ack_num))
@@ -140,12 +144,13 @@ def fast_retransmit(ack_num):
 
 # Send first packet
 msg = json.dumps({"syn": True, "seq_num": SEQUENCE, "data": "", "fin": False, "ack": False})
-log("About to send Syn")
+log("About to send Syn " + str(SEQUENCE))
 unacked_packets[SEQUENCE] = (datetime.datetime.now(), "")
 sock.sendto(msg, dest)
 
 # Now read in data, send packets
 while True:
+    time.sleep(RTT)
     check_timeout()
     log("ABOUT TO SLEEP")
     result = sock.recvfrom(MTU)
@@ -157,8 +162,12 @@ while True:
             decoded = json.loads(data)
 
             if decoded['syn']:
+		ack_numb = decoded['ack']-1
                 log("Connection establishing")
+		log("unackepackets " + str(unacked_packets.items()))
                 SEQUENCE += 1
+		#TODO: Remove the syn from unacked packets
+		del unacked_packets[ack_numb]
                 if decoded['ack'] == SEQUENCE:
                     send_next_packet()
 
@@ -191,7 +200,7 @@ while True:
                     dup_acks_count += 1
                     if dup_acks_count == 2:
                         # TODO: fast retransmit
-                        log("[dup ack]" + ack_num)
+                        log("[dup ack]" + str(ack_num))
                         fast_retransmit(ack_num)
 
 

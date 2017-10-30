@@ -1,4 +1,8 @@
 #!/usr/bin/python -u
+#
+# CS3700, Spring 2015
+# Project 2 Starter Code
+#
 
 import sys
 import socket
@@ -26,11 +30,21 @@ wnd = min(cwnd, adv_wnd)
 
 # OrderedDict[(unACKed packet's SEQ number, time sent)] sorted by chronological sent times
 # used for RTT sampling, RTO, and receiving out-of-order ACKs
-#   - each time packet sent, add (seq#, time sent)
+#   - each time packet sent, add (seq#, time sent); TODO: if packet retransmitted, set value to 0
 #   - when ACK received, record time received, calc_rto(unacked_packets[ack#], time received), remove ack# from dict
 unacked_packets = OrderedDict([])
 dup_acks_count = 0 # retransmit at 2 (meaning 3 of the same ACKs were received)
 
+# Bind to localhost and an ephemeral port
+IP_PORT = sys.argv[1]
+UDP_IP = IP_PORT[0:IP_PORT.find(":")]
+UDP_PORT = int(IP_PORT[IP_PORT.find(":")+1:])
+dest = (UDP_IP, UDP_PORT)
+
+# Set up the socket
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+# initial RTO 3 seconds
+sock.settimeout(30)
 
 def log(string):
     sys.stderr.write(datetime.datetime.now().strftime("%H:%M:%S.%f") + " " + string + "\n")
@@ -123,82 +137,72 @@ def fast_retransmit(ack_num):
     cwnd = ssthresh / 2
     dup_acks_count = 0
 
-if __name__ == "main":
-    # Bind to localhost and an ephemeral port
-    IP_PORT = sys.argv[1]
-    UDP_IP = IP_PORT[0:IP_PORT.find(":")]
-    UDP_PORT = int(IP_PORT[IP_PORT.find(":")+1:])
-    dest = (UDP_IP, UDP_PORT)
 
-    # Set up the socket
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    # initial RTO 3 seconds
-    sock.settimeout(30)
+# Send first packet
+msg = json.dumps({"syn": True, "seq_num": SEQUENCE, "data": "", "fin": False, "ack": False})
+log("About to send Syn")
+unacked_packets[SEQUENCE] = (datetime.datetime.now(), "")
+sock.sendto(msg, dest)
 
-    # Send first packet
-    msg = json.dumps({"syn": True, "seq_num": SEQUENCE, "data": "", "fin": False, "ack": False})
-    log("About to send Syn")
-    unacked_packets[SEQUENCE] = (datetime.datetime.now(), "")
-    sock.sendto(msg, dest)
+# Now read in data, send packets
+while True:
+    check_timeout()
+    log("ABOUT TO SLEEP")
+    result = sock.recvfrom(MTU)
 
-    # Now read in data, send packets
-    while True:
-        check_timeout()
-        log("ABOUT TO SLEEP")
-        result = sock.recvfrom(MTU)
+    if result:
+        ack_time = datetime.datetime.now()
+        (data, addr) = result
+        try:
+            decoded = json.loads(data)
 
-        if result:
-            ack_time = datetime.datetime.now()
-            (data, addr) = result
-            try:
-                decoded = json.loads(data)
+            if decoded['syn']:
+                log("Connection establishing")
+                SEQUENCE += 1
+                if decoded['ack'] == SEQUENCE:
+                    send_next_packet()
 
-                if decoded['syn']:
-                    log("Connection establishing")
-                    SEQUENCE += 1
-                    if decoded['ack'] == SEQUENCE:
-                        send_next_packet()
+            else:
+                # If there is an ack, process that ACK (duplicate? retransmit? send next packet?)
+                ack_num = decoded['ack']
+                sent_time = unacked_packets.get(ack_num, None)
 
+                if sent_time is not None: # not a duplicate ACK
+                    log("[recv ack] " + str(ack_num))
+
+                    # update cwnd and RTO if not retransmitted packet ACK
+                    # (retransmitted packets should have value set to 0)
+                    if sent_time is not 0:
+                        calc_rto(unacked_packets[ack_num][0], ack_time)
+                        del unacked_packets[ack_num] # remove acked packet from unacked_packets
+
+                        if cwnd < ssthresh: # slow start
+                            cwnd += 1
+                        else: # congestion avoidance
+                            cwnd += 1 / cwnd
+
+
+                    # Try to send next packet; break if no more data
+                    if (not send_next_packet()):
+                        break
+
+                # packet matching ACK not in unacked_packets ==> duplicate ACK
                 else:
-                    # If there is an ack, process that ACK (duplicate? retransmit? send next packet?)
-                    ack_num = decoded['ack']
-                    sent_time = unacked_packets.get(ack_num, None)
-
-                    if sent_time is not None: # not a duplicate ACK
-                        log("[recv ack] " + str(ack_num))
-
-                        # update cwnd and RTO if not retransmitted packet ACK
-                        # (retransmitted packets should have value set to 0)
-                        if sent_time is not 0:
-                            calc_rto(unacked_packets[ack_num][0], ack_time)
-                            del unacked_packets[ack_num] # remove acked packet from unacked_packets
-
-                            if cwnd < ssthresh: # slow start
-                                cwnd += 1
-                            else: # congestion avoidance
-                                cwnd += 1 / cwnd
+                    dup_acks_count += 1
+                    if dup_acks_count == 2:
+                        # TODO: fast retransmit
+                        log("[dup ack]" + ack_num)
+                        fast_retransmit(ack_num)
 
 
-                        # Try to send next packet; break if no more data
-                        if (not send_next_packet()):
-                            break
+            # replace with thread for monitoring timeouts?
+            #check_timeout()
 
-                    # packet matching ACK not in unacked_packets ==> duplicate ACK
-                    else:
-                        dup_acks_count += 1
-                        if dup_acks_count == 2:
-                            log("[dup ack]" + ack_num)
-                            fast_retransmit(ack_num)
+        except ('''ValueError, KeyError, TypeError'''):
+            log("[recv corrupt packet]")
+    else:
+        log("[error] timeout")
+        sys.exit(-1)
 
-
-                            # replace with thread for monitoring timeouts?
-                            #check_timeout()
-
-            except ('''ValueError, KeyError, TypeError'''):
-                log("[recv corrupt packet]")
-        else:
-            log("[error] timeout")
-            sys.exit(-1)
-
-    sock.sendto(json.dumps({"fin": True, "data": "", "seq_num": SEQUENCE, "ack": False, "syn": False}), dest)
-    sys.exit(0)
+sock.sendto(json.dumps({"fin": True, "data": "", "seq_num": SEQUENCE, "ack": False, "syn": False}), dest)
+sys.exit(0)

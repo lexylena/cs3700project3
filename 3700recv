@@ -1,4 +1,8 @@
 #!/usr/bin/python -u
+#
+# CS3700, Spring 2015
+# Project 2 Starter Code
+#
 
 import sys
 import socket
@@ -8,7 +12,7 @@ import select
 import json
 
 def log(string):
-    sys.stderr.write(datetime.datetime.now().strftime("%H:%M:%S.%f") + " " + string + "\n")
+  sys.stderr.write(datetime.datetime.now().strftime("%H:%M:%S.%f") + " " + string + "\n")
 
 MSG_SIZE = 1500
 TIMEOUT = 30
@@ -17,63 +21,62 @@ TIMEOUT = 30
 UDP_IP = "127.0.0.1"
 UDP_PORT = 0
 
-if __name__ == "main":
-    # Set up the socket
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind((UDP_IP, UDP_PORT))
-    sock.settimeout(TIMEOUT)
+# Set up the socket
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.bind((UDP_IP, UDP_PORT))
+sock.settimeout(TIMEOUT)
 
-    # Get port we bound to
-    UDP_PORT = sock.getsockname()[1]
-    log("[bound] " + str(UDP_PORT))
+# Get port we bound to
+UDP_PORT = sock.getsockname()[1]
+log("[bound] " + str(UDP_PORT))
 
-    #Next expected sequence number
-    expected_sequence = 0
+#Next expected sequence number
+expected_sequence = 0
 
-    # Now listen for packets
-    while True:
-        result = sock.recvfrom(MSG_SIZE)
+# Now listen for packets
+while True:
+  result = sock.recvfrom(MSG_SIZE)
 
-        # If nothing is ready, we hit the timeout
-        if result:
-            (data, addr) = result
+  # If nothing is ready, we hit the timeout
+  if result:
+    (data, addr) = result
 
-            try:
-                decoded = json.loads(data)
+    try:
+      decoded = json.loads(data)
 
-                # If the EOF flag is set, exit
-                if (decoded['fin']):
-                    log("[completed]")
-                    sys.exit(0)
+      # If the EOF flag is set, exit
+      if (decoded['fin']):
+        log("[completed]")
+        sys.exit(0)
 
-                if (decoded['syn']):
-                    log("Starting connection...")
-                    expected_sequence = decoded['seq_num'] + 1
-                    msg = json.dumps({"syn": True, "ack": decoded['seq_num']+1})
-                    sock.sendto(msg, addr)
+      if (decoded['syn']):
+        log("Starting connection...")
+        expected_sequence = decoded['seq_num'] + 1
+        msg = json.dumps({"syn": True, "ack": decoded['seq_num']+1})
+        sock.sendto(msg, addr)
 
-                # If there is data, we accept it and print it out
-                elif (decoded['data']):
-                    # Send back an ack to the sender
-                    if decoded['seq_num'] == expected_sequence:
-                        log("[recv data] " + str(decoded['seq_num']) + " (" + str(len(decoded['data'])) + ") ACCEPTED (in-order)")
-                        sys.stdout.write(decoded['data'])
-                        expected_sequence += len(decoded['data'])
-                        log("expected next sequence" + str(expected_sequence))
-                        msg = json.dumps({"ack": decoded['seq_num'] + len(decoded['data']), "syn": False})
-                        log("About to send " + msg)
-                        if sock.sendto(msg, addr) < len(msg):
-                            log("[error] unable to fully send packet")
-                    else:
-                        log("Unexpected seq num")
+      # If there is data, we accept it and print it out
+      elif (decoded['data']):
+        # Send back an ack to the sender
+          if decoded['seq_num'] == expected_sequence:
+            log("[recv data] " + str(decoded['seq_num']) + " (" + str(len(decoded['data'])) + ") ACCEPTED (in-order)")
+            sys.stdout.write(decoded['data'])
+            expected_sequence += len(decoded['data'])
+            log("expected next sequence" + str(expected_sequence))
+            msg = json.dumps({"ack": decoded['seq_num'] + len(decoded['data']), "syn": False})
+            log("About to send " + msg)
+            if sock.sendto(msg, addr) < len(msg):
+              log("[error] unable to fully send packet")
+          else:
+            log("Unexpected seq num")
 
-                        msg = json.dumps({"ack": expected_sequence, "syn": False})
-                        if sock.sendto(msg, addr) < len(msg):
-                            log("[error] unable to fully send packet")
+            msg = json.dumps({"ack": expected_sequence, "syn": False})
+            if sock.sendto(msg, addr) < len(msg):
+              log("[error] unable to fully send packet")
 
-            except (ValueError, KeyError, TypeError) as e:
-                log("[recv corrupt packet]")
-                raise e
-        else:
-            log("[error] timeout")
-            sys.exit(-1)
+    except (ValueError, KeyError, TypeError) as e:
+      log("[recv corrupt packet]")
+      raise e
+  else:
+    log("[error] timeout")
+    sys.exit(-1)

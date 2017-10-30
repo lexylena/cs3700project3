@@ -89,7 +89,6 @@ def check_timeout():
 	log("unacked items " + str(unacked_packets.items()))
         msg = json.dumps({"seq_num": unacked[0], "data": unacked[1][1], "fin": False, "syn": False})
         SEQUENCE = unacked[0]
-	log("data to resend " + str(unacked[1][1]))
 	log("About to send " + str(msg))
         if sock.sendto(msg, dest) < len(msg):
             log("[error] unable to fully send packet")
@@ -126,8 +125,8 @@ def send_next_packet():
 
 def fast_retransmit(ack_num):
     global cwnd, ssthresh, unacked_packets, dup_acks_count, SEQUENCE
-
-    packet = unacked_packets[ack_num] #TODO: This throws a keyerror
+    log("uackedPackets " + str(unacked_packets) + " ack_num " + str(ack_num))
+    packet = unacked_packets[ack_num+1000] #TODO: This throws a keyerror off by 1000 ie ack_num does not include the length in the unacked_packets dict, but the number passed to the func does
     msg = json.dumps({"seq_num": ack_num, "data": packet[1], "fin": False,
                       "syn": False, "ack": False})
     log("[retransmission] packet " + str(ack_num))
@@ -135,7 +134,7 @@ def fast_retransmit(ack_num):
         log("[error] unable to fully send packet")
 
     SEQUENCE = ack_num + len(packet[1])     # reset SEQUENCE to last missing packet
-    unacked_packets[ack_num][0] = 0         # set packet's sent time to 0 (exclude from RTT sampling)
+    #unacked_packets[ack_num][0] = 0         # set packet's sent time to 0 (exclude from RTT sampling) #TODO: Cannot assign to tuples in this way
 
     # fast recovery
     cwnd = ssthresh / 2
@@ -201,7 +200,7 @@ while True:
                     if dup_acks_count == 2:
                         # TODO: fast retransmit
                         log("[dup ack]" + str(ack_num))
-                        fast_retransmit(ack_num)
+                        fast_retransmit(ack_num) #TODO:This is a prob
 
 
             # replace with thread for monitoring timeouts?

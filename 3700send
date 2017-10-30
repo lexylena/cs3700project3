@@ -69,7 +69,7 @@ def calc_rto(sent, acked):
     log("calc_rto sample = " + str(sample))
     RTT = alpha * RTT + (1 - alpha) * sample
     log("calc_rto rtt = " + str(RTT))
-    RTO = 2 * RTT #TODO set back
+    RTO = 2 * RTT 
     #sock.settimeout(RTO)
 
 
@@ -166,7 +166,7 @@ while True:
                 log("Connection establishing")
 		log("unackepackets " + str(unacked_packets.items()))
                 SEQUENCE += 1
-		#TODO: Remove the syn from unacked packets
+		#TODO: This occasionally throws key error
 		del unacked_packets[ack_numb]
                 if decoded['ack'] == SEQUENCE:
                     send_next_packet()

@@ -126,8 +126,8 @@ def send_next_packet():
 def fast_retransmit(ack_num):
     global cwnd, ssthresh, unacked_packets, dup_acks_count, SEQUENCE
     log("uackedPackets " + str(unacked_packets) + " ack_num " + str(ack_num))
-    packet = unacked_packets[ack_num+1000] #TODO: This throws a keyerror off by 1000 ie ack_num does not include the length in the unacked_packets dict, but the number passed to the func does
-    msg = json.dumps({"seq_num": ack_num+1000, "data": packet[1], "fin": False,
+    packet = unacked_packets[ack_num] #TODO: This throws a keyerror off by 1000 ie ack_num does not include the length in the unacked_packets dict, but the number passed to the func does
+    msg = json.dumps({"seq_num": ack_num, "data": packet[1], "fin": False,
                       "syn": False, "ack": False})
     log("[retransmission] packet " + str(ack_num))
     if sock.sendto(msg, dest) < len(msg):

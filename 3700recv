@@ -44,9 +44,11 @@ while True:
     try:
       decoded = json.loads(data)
 
-      # If the EOF flag is set, exit
+      # If the FIN flag is set, exit
       if (decoded['fin']):
         log("[completed] " + str(decoded))
+        msg = json.dumps({"fin": True, "ack": decoded['seq_num'] + 1})
+        sock.sendto(msg, addr)
         sys.exit(0)
 
       if (decoded['syn']):
@@ -60,15 +62,18 @@ while True:
         # Send back an ack to the sender
           if decoded['seq_num'] == expected_sequence:
             log("[recv data] " + str(decoded['seq_num']) + " (" + str(len(decoded['data'])) + ") ACCEPTED (in-order)")
+
             sys.stdout.write(decoded['data'])
             expected_sequence += len(decoded['data'])
-            log("expected next sequence" + str(expected_sequence))
+
+            # log("expected next sequence" + str(expected_sequence))
+            
             msg = json.dumps({"ack": decoded['seq_num'] + len(decoded['data']), "syn": False})
-            log("About to send " + msg)
+            # log("About to send " + msg)
             if sock.sendto(msg, addr) < len(msg):
               log("[error] unable to fully send packet")
           else:
-            log("Unexpected seq num")
+            log("[recv unexpected SEQ]")
 
             msg = json.dumps({"ack": expected_sequence, "syn": False})
             if sock.sendto(msg, addr) < len(msg):

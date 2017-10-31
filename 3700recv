@@ -46,9 +46,9 @@ while True:
             decoded = json.loads(data)
 
             # If the FIN flag is set, exit
-            if (decoded['fin']):
+            if (decoded['fin'] and decoded['seq_num'] == expected_sequence):
                 log("[completed] " + str(decoded))
-                msg = json.dumps({"fin": True, "ack": decoded['seq_num'] + 1})
+                msg = json.dumps({"fin": True, "ack": expected_sequence + 1})
                 sock.sendto(msg, addr)
                 sys.exit(0)
 
@@ -75,15 +75,15 @@ while True:
                     if sock.sendto(msg, addr) < len(msg):
                         log("[error] unable to fully send packet")
 
-                elif decoded['seq_num']%MSG_SIZE == syn_num: # duplicate data, but sender didn't receive a previous ACK
+                elif (decoded['seq_num']%1000) == syn_num and decoded['seq_num'] < expected_sequence: # duplicate data, but sender didn't receive a previous ACK
                     msg = json.dumps({"ack": decoded['seq_num'] + len(decoded['data']), "syn": False})
-                    log("[ack retransmission] " + str(decoded['seq_num']))
+                    log("[ack retransmission] received " + str(decoded['seq_num']) + " expected " + str(expected_sequence))
                     if sock.sendto(msg, addr) < len(msg): # just resend ACK, ignore data
                         log("[error] unable to fully send packet")
 
                 else:
                     log("[recv unexpected SEQ] received " + str(decoded['seq_num']) + " expected " + str(expected_sequence))
-
+                    log("syn num mod " + str(decoded['seq_num']%MSG_SIZE))
                     msg = json.dumps({"ack": expected_sequence, "syn": False})
                     if sock.sendto(msg, addr) < len(msg):
                         log("[error] unable to fully send packet")

@@ -12,6 +12,7 @@ import select
 import json
 from random import randint
 from collections import OrderedDict
+import time
 
 alpha = 0.875
 MTU = 1500
@@ -29,9 +30,9 @@ ssthresh = adv_wnd          # threshold size (used to update cwnd)
 wnd = min(cwnd, adv_wnd)
 eff_wnd = wnd # TODO: implement eff_wnd use
 
-# OrderedDict[(unACKed packet's SEQ number, time sent)] sorted by chronological sent times
+# OrderedDict[(unACKed packet's SEQ number, [time sent, data])] sorted by chronological sent times
 # used for RTT sampling, RTO, and receiving out-of-order ACKs
-#   - each time packet sent, add (seq#, time sent)
+#   - each time packet sent, add (seq#, [time sent, data])
 #   - when ACK received, record time received, calc_rto(unacked_packets[ack#], time received), remove ack# from dict
 unacked_packets = OrderedDict([])
 dup_acks_count = 0 # retransmit at 2 (meaning 3 of the same ACKs were received)
@@ -96,14 +97,15 @@ def check_timeout():
         msg = json.dumps({"seq_num": (unacked[0] - len(unacked[1][1])) ,
                           "data": unacked[1][1], "fin": False,
                           "syn": False, "ack": False})
+        log("unacked items " + str(unacked_packets.items()))
         SEQUENCE = unacked[0]
+        log("About to send " + str(msg))
         if sock.sendto(msg, dest) < len(msg):
             log("[error] unable to fully send packet")
         return True
 
     else:
         return False
-
 
 def send_next_packet():
     global SEQUENCE, unacked_packets, eff_wnd
@@ -112,6 +114,7 @@ def send_next_packet():
         retransmit = unacked_packets.get(SEQUENCE, None)
         if retransmit:
             data = retransmit[1]
+            #log("unackedpackets[seq][0]" + str(unacked_packets[SEQUENCE][0]))
             unacked_packets[SEQUENCE][0] = 0
         else:
             data = sys.stdin.read(MSS)
@@ -121,7 +124,7 @@ def send_next_packet():
                               "syn": False, "ack": False})
             log("Sequence sent" + str(SEQUENCE))
             SEQUENCE += len(data)
-            unacked_packets[SEQUENCE] = (datetime.datetime.now(), data)
+            unacked_packets[SEQUENCE] = [datetime.datetime.now(), data]
 
             if sock.sendto(msg, dest) < len(msg):
                 log("[error] unable to fully send packet")
@@ -136,8 +139,8 @@ def send_next_packet():
 
 def fast_retransmit(ack_num):
     global cwnd, ssthresh, unacked_packets, dup_acks_count, SEQUENCE
-
-    packet = unacked_packets[ack_num]
+    log("uackedPackets " + str(unacked_packets) + " ack_num " + str(ack_num))
+    packet = unacked_packets[ack_num] #TODO: This throws a keyerror off by 1000 ie ack_num does not include the length in the unacked_packets dict, but the number passed to the func does
     msg = json.dumps({"seq_num": ack_num, "data": packet[1], "fin": False,
                       "syn": False, "ack": False})
     log("[retransmission] packet " + str(ack_num))
@@ -154,12 +157,17 @@ def fast_retransmit(ack_num):
 
 # Send first packet
 msg = json.dumps({"syn": True, "seq_num": SEQUENCE, "data": "", "fin": False, "ack": False})
-log("About to send Syn")
-unacked_packets[SEQUENCE] = (datetime.datetime.now(), "")
+log("About to send Syn " + str(SEQUENCE))
+unacked_packets[SEQUENCE] = [datetime.datetime.now(), ""]
 sock.sendto(msg, dest)
 
 # Now read in data, send packets
 while True:
+# <<<<<<< HEAD
+# =======
+#     time.sleep(RTT)
+#     check_timeout()
+# >>>>>>> c55fd4fdf3395ee88b345c65a25869f7e404e004
     log("ABOUT TO SLEEP")
     ready = select.select([sock], [], [], RTO)
     if ready[0]:
@@ -171,8 +179,12 @@ while True:
             decoded = json.loads(data)
 
             if decoded['syn']:
+                ack_numb = decoded['ack']-1
                 log("Connection establishing")
-                # TODO: handle wrong syn packet?
+
+                log("unackepackets " + str(unacked_packets.items()))
+                #TODO: This occasionally throws key error
+                del unacked_packets[ack_numb]
                 if decoded['ack'] == SEQUENCE:
                     SEQUENCE += 1
                     calc_rto(unacked_packets[decoded['ack']][0], ack_time)
@@ -206,16 +218,24 @@ while True:
                 # packet matching ACK not in unacked_packets ==> duplicate ACK
                 else:
                     dup_acks_count += 1
-                    if dup_acks_count < 2:
+# <<<<<<< HEAD
+#                     if dup_acks_count < 2:
+#                         check_timeout()
+#                     else: # received 3 duplicate ACKs
+#                         log("[dup ack]" + ack_num)
+#                         fast_retransmit(ack_num)
+# =======
+                    log("dupes " + str(dup_acks_count))
+                    if dup_acks_count < 3:
                         check_timeout()
-                    else: # received 3 duplicate ACKs
-                        log("[dup ack]" + ack_num)
-                        fast_retransmit(ack_num)
+                    else:
+                        log("[dup ack] " + str(ack_num))
+                        fast_retransmit(ack_num) #TODO:This is a prob
+                        #  dup_acks_count = 0
 
 
             # replace with thread for monitoring timeouts?
             #check_timeout()
-
         except ('''ValueError, KeyError, TypeError'''):
             log("[recv corrupt packet]")
     else:

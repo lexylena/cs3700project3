@@ -75,7 +75,7 @@ def retransmit_after_timeout(unacked):
     global cwnd, ssthresh, dup_acks_count, unacked_packets, SEQUENCE
     if unacked[1][1] == "":
         msg = json.dumps({"syn": True, "seq_num": SEQUENCE-1, "data": "", "fin": False, "ack": False})
-        log("About to send Syn " + str(SEQUENCE))
+        log("[retransmission] SYN " + str(SEQUENCE-1))
         unacked_packets[SEQUENCE] = [datetime.datetime.now(), ""]
         sock.sendto(msg, dest)
     else:
@@ -132,7 +132,7 @@ def send_next_packet():
         if (len(data) > 0):
             msg = json.dumps({"seq_num": SEQUENCE, "data": data, "fin": False,
                               "syn": False, "ack": False})
-            log("Sequence sent" + str(SEQUENCE))
+            # log("Sequence sent" + str(SEQUENCE))
             SEQUENCE += len(data)
             unacked_packets[SEQUENCE] = [datetime.datetime.now(), data]
 
@@ -142,7 +142,7 @@ def send_next_packet():
             if sock.sendto(msg, dest) < len(msg):
                 log("[error] unable to fully send packet")
             else:
-                log("[send data] " + str(SEQUENCE) + " (" + str(len(data)) + ")")
+                log("[send data] " + str(SEQUENCE - len(data)) + " (" + str(len(data)) + ")")
             return True
         else:
             return False
@@ -160,7 +160,7 @@ def fast_retransmit(ack_num):
 
     msg = json.dumps({"seq_num": ack_num, "data": packet[1], "fin": False,
                       "syn": False, "ack": False})
-    log("[retransmission] packet " + str(ack_num))
+    log("[retransmission] DATA packet " + str(ack_num))
     if sock.sendto(msg, dest) < len(msg):
         log("[error] unable to fully send packet")
 
@@ -174,7 +174,7 @@ def fast_retransmit(ack_num):
 
 # Send first packet
 msg = json.dumps({"syn": True, "seq_num": SEQUENCE, "data": "", "fin": False, "ack": False})
-log("About to send Syn " + str(SEQUENCE))
+log("[SYN] " + str(SEQUENCE))
 SEQUENCE +=1
 unacked_packets[SEQUENCE] = [datetime.datetime.now(), ""]
 sock.sendto(msg, dest)
@@ -189,22 +189,21 @@ while True:
         result = ready[0][0].recvfrom(MTU)
         ack_time = datetime.datetime.now()
         (data, addr) = result
-        log("data:" + str(data))
+        # log("data:" + str(data))
         try:
             decoded = json.loads(data)
 
-            if decoded['syn']:
+            if decoded['syn'] and decoded['ack'] == SEQUENCE:
                 ack_num = decoded['ack']
-                log("Connection establishing")
+                log("[recv SYN/ACK] " + str(ack_num) + " : Connection establishing")
 
                 # log("unackepackets " + str(unacked_packets.items()))
                 #TODO: This occasionally throws key error
-                log("syn ack:" + str(decoded['ack']))
-                log("SEQUENCE: " + str(SEQUENCE))
-                if decoded['ack'] == SEQUENCE:
-                    calc_rto(unacked_packets[decoded['ack']][0], ack_time)
-                    del unacked_packets[ack_num]
-                    send_next_packet()
+                # log("syn ack:" + str(decoded['ack']))
+                # log("SEQUENCE: " + str(SEQUENCE))
+                calc_rto(unacked_packets[decoded['ack']][0], ack_time)
+                del unacked_packets[ack_num]
+                send_next_packet()
 
             else:
                 # If there is an ack, process that ACK (duplicate? retransmit? send next packet?)
@@ -229,13 +228,13 @@ while True:
 
                     # Try to send next packet; break if no more data
                     if (not send_next_packet()):
-                        log("no more data")
+                        log("[FIN] no more data")
                         break
 
                 # packet matching ACK not in unacked_packets ==> duplicate ACK
                 else:
                     dup_acks_count += 1
-                    log("dupes " + str(dup_acks_count))
+                    # log("dupes " + str(dup_acks_count))
                     if dup_acks_count < 3:
                         check_timeout()
                     else:

@@ -12,10 +12,11 @@ import select
 import json
 
 def log(string):
-  sys.stderr.write(datetime.datetime.now().strftime("%H:%M:%S.%f") + " " + string + "\n")
+    sys.stderr.write(datetime.datetime.now().strftime("%H:%M:%S.%f") + " " + string + "\n")
 
 MSG_SIZE = 1500
 TIMEOUT = 30
+syn_num = 0
 
 # Bind to localhost and an ephemeral port
 UDP_IP = "127.0.0.1"
@@ -35,53 +36,61 @@ expected_sequence = 0
 
 # Now listen for packets
 while True:
-  result = sock.recvfrom(MSG_SIZE)
+    result = sock.recvfrom(MSG_SIZE)
 
-  # If nothing is ready, we hit the timeout
-  if result:
-    (data, addr) = result
+    # If nothing is ready, we hit the timeout
+    if result:
+        (data, addr) = result
 
-    try:
-      decoded = json.loads(data)
+        try:
+            decoded = json.loads(data)
 
-      # If the FIN flag is set, exit
-      if (decoded['fin']):
-        log("[completed] " + str(decoded))
-        msg = json.dumps({"fin": True, "ack": decoded['seq_num'] + 1})
-        sock.sendto(msg, addr)
-        sys.exit(0)
+            # If the FIN flag is set, exit
+            if (decoded['fin']):
+                log("[completed] " + str(decoded))
+                msg = json.dumps({"fin": True, "ack": decoded['seq_num'] + 1})
+                sock.sendto(msg, addr)
+                sys.exit(0)
 
-      if (decoded['syn']):
-        log("Starting connection...")
-        expected_sequence = decoded['seq_num'] + 1
-        msg = json.dumps({"syn": True, "ack": decoded['seq_num']+1})
-        sock.sendto(msg, addr)
+            if (decoded['syn']):
+                log("Starting connection...")
+                syn_num = decoded['seq_num'] + 1
+                expected_sequence = decoded['seq_num'] + 1
+                msg = json.dumps({"syn": True, "ack": decoded['seq_num']+1})
+                sock.sendto(msg, addr)
 
-      # If there is data, we accept it and print it out
-      elif (decoded['data']):
-        # Send back an ack to the sender
-          if decoded['seq_num'] == expected_sequence:
-            log("[recv data] " + str(decoded['seq_num']) + " (" + str(len(decoded['data'])) + ") ACCEPTED (in-order)")
+            # If there is data, we accept it and print it out
+            elif (decoded['data']):
+                # Send back an ack to the sender
+                if decoded['seq_num'] == expected_sequence:
+                    log("[recv data] " + str(decoded['seq_num']) + " (" + str(len(decoded['data'])) + ") ACCEPTED (in-order)")
 
-            sys.stdout.write(decoded['data'])
-            expected_sequence += len(decoded['data'])
+                    sys.stdout.write(decoded['data'])
+                    expected_sequence += len(decoded['data'])
 
-            # log("expected next sequence" + str(expected_sequence))
+                    # log("expected next sequence" + str(expected_sequence))
 
-            msg = json.dumps({"ack": decoded['seq_num'] + len(decoded['data']), "syn": False})
-            # log("About to send " + msg)
-            if sock.sendto(msg, addr) < len(msg):
-              log("[error] unable to fully send packet")
-          else:
-            log("[recv unexpected SEQ]")
+                    msg = json.dumps({"ack": decoded['seq_num'] + len(decoded['data']), "syn": False})
+                    # log("About to send " + msg)
+                    if sock.sendto(msg, addr) < len(msg):
+                        log("[error] unable to fully send packet")
 
-            msg = json.dumps({"ack": expected_sequence, "syn": False})
-            if sock.sendto(msg, addr) < len(msg):
-              log("[error] unable to fully send packet")
+                elif decoded['seq_num']%MSG_SIZE == syn_num: # duplicate data, but sender didn't receive a previous ACK
+                    msg = json.dumps({"ack": decoded['seq_num'] + len(decoded['data']), "syn": False})
+                    log("[ack retransmission] " + str(decoded['seq_num']))
+                    if sock.sendto(msg, addr) < len(msg): # just resend ACK, ignore data
+                        log("[error] unable to fully send packet")
 
-    except (ValueError, KeyError, TypeError) as e:
-      log("[recv corrupt packet]")
-      raise e
-  else:
-    log("[error] timeout")
-    sys.exit(-1)
+                else:
+                    log("[recv unexpected SEQ] received " + str(decoded['seq_num']) + " expected " + str(expected_sequence))
+
+                    msg = json.dumps({"ack": expected_sequence, "syn": False})
+                    if sock.sendto(msg, addr) < len(msg):
+                        log("[error] unable to fully send packet")
+
+        except (ValueError, KeyError, TypeError) as e:
+            log("[recv corrupt packet]")
+            raise e
+    else:
+        log("[error] timeout")
+        sys.exit(-1)

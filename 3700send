@@ -25,7 +25,7 @@ SEQUENCE = randint(0, 10)
 ACK = None # last received ACK number
 
 cwnd = 1                    # congestion window
-adv_wnd = 4                 # receiver advertised window (TODO: set in connection setup)
+adv_wnd = 10                # receiver advertised window (TODO: set in connection setup)
 ssthresh = adv_wnd          # threshold size (used to update cwnd)
 eff_wnd = min(cwnd, adv_wnd)
 
@@ -99,6 +99,7 @@ def retransmit_after_timeout(unacked):
     # else:
     ssthresh = cwnd / 2
     cwnd = 1
+    eff_wnd = min(cwnd, adv_wnd)
     dup_acks_count = 0
     msg = json.dumps({"seq_num": unacked[0], "data": unacked[1][1],
                       "fin": False, "syn": False, "ack": False})
@@ -107,6 +108,7 @@ def retransmit_after_timeout(unacked):
     unacked_packets[unacked[0]][2] = True # set retransmitted to True
 
     eff_wnd -= 1
+    log("[eff_wnd retransmit_After_timeout] " + str(eff_wnd))
     if sock.sendto(msg, dest) < len(msg):
         log("[error] unable to fully send packet")
 
@@ -136,7 +138,7 @@ def check_timeout():
 
 def send_next_packet():
     global SEQUENCE, unacked_packets, eff_wnd
-    log("[eff_wnd] " + str(eff_wnd))
+    log("[eff_wnd send_next_packet before] " + str(eff_wnd))
 
     if (eff_wnd >= 1):
         retransmit = unacked_packets.get(SEQUENCE, None)
@@ -156,6 +158,7 @@ def send_next_packet():
 
             # decrement effective window size
             eff_wnd -= 1
+            log("[eff_wnd send next packet after sending] " + str(eff_wnd))
 
             if sock.sendto(msg, dest) < len(msg):
                 log("[error] unable to fully send packet")
@@ -171,6 +174,11 @@ def send_next_packet():
 def fast_retransmit(seq_num):
     global cwnd, eff_wnd, ssthresh, unacked_packets, dup_acks_count, SEQUENCE
 
+    # fast recovery
+    cwnd = ssthresh / 2
+    eff_wnd = min(cwnd, adv_wnd)
+    dup_acks_count = 0
+
     # unacked_packets contains packets mapped to their SEQ number
     # if receiver sends duplicate ACKs for an ack_num, then need to resend packet with SEQUENCE=ack_num
     # if last packet and len < MSS, get the first (and only) unacked packet
@@ -180,20 +188,21 @@ def fast_retransmit(seq_num):
                       "syn": False, "ack": False})
     log("[retransmission] DATA packet " + str(seq_num))
     eff_wnd -= 1
+    log("[eff_wnd fast_retransmit] " + str(eff_wnd))
+
     if sock.sendto(msg, dest) < len(msg):
         log("[error] unable to fully send packet")
 
     SEQUENCE = seq_num + len(packet[1])        # reset SEQUENCE to last missing packet
     unacked_packets[seq_num][2] = True         # set retransmitted to True (exclude from RTT sampling)
 
-    # fast recovery
-    cwnd = ssthresh / 2
-    dup_acks_count = 0
 
 def teardown_connection():
     global unacked_packets, eff_wnd, SEQUENCE, RTO
     if len(unacked_packets.items()) > 0:
         log("[fin error] unacked_packets len > 0")
+        log("unacked_packets = " + str(unacked_packets))
+        sys.exit(0)
     else:
         sock.sendto(json.dumps({"fin": True, "data": "", "seq_num": SEQUENCE, "ack": False, "syn": False}), dest)
         ready = select.select([sock], [], [], RTO)
@@ -240,6 +249,7 @@ while True:
                 RTT = syn_rtt.seconds + syn_rtt.microseconds/float(1000000)
                 RTO = 2 * RTT
                 del unacked_packets[syn]
+                log("sending first data packet")
                 send_next_packet()
 
             else:
@@ -253,6 +263,7 @@ while True:
                 log("[wnd] " + str(min(cwnd, adv_wnd)))
                 if eff_wnd < min(cwnd, adv_wnd):
                     eff_wnd += 1
+                    log("[eff_wnd add ACK] " + str(eff_wnd))
 
                 if unacked_data is not None: # not a duplicate ACK
                     log("[recv ack] " + str(ack_num))
@@ -271,7 +282,7 @@ while True:
 
 
                     # Try to send next packet; break if no more data
-                    if (not send_next_packet()):
+                    if (not send_next_packet()) and len(unacked_packets.items()) == 0:
                         teardown_connection()
                         # log("[FIN] no more data")
                         # break
@@ -280,6 +291,10 @@ while True:
                 else:
                     dup_acks_count += 1
                     log("dupes " + str(dup_acks_count))
+                    if eff_wnd < min(cwnd, adv_wnd):
+                        eff_wnd += 1
+                        log("[eff_wnd add dupack] " + str(eff_wnd))
+
                     if dup_acks_count < 3:
                         check_timeout()
                     else:
@@ -294,6 +309,8 @@ while True:
             log("[recv corrupt packet]")
             if eff_wnd < min(cwnd, adv_wnd):
                 eff_wnd += 1
+                log("[eff_wnd add corrupt ack] " + str(eff_wnd))
+
     else:
         log("[timeout]")
         if not synced:
@@ -303,6 +320,7 @@ while True:
         else:
             items = unacked_packets.items()
             if len(items) > 0:
+                log("[retransmission after timeout] " + str(items[0]))
                 retransmit_after_timeout(items[0])
             #else:
             #   log("no more unacked_packets: " + str(len(items)))

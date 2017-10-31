@@ -158,9 +158,10 @@ def fast_retransmit(ack_num):
 # Send first packet
 msg = json.dumps({"syn": True, "seq_num": SEQUENCE, "data": "", "fin": False, "ack": False})
 log("About to send Syn " + str(SEQUENCE))
+SEQUENCE +=1
 unacked_packets[SEQUENCE] = [datetime.datetime.now(), ""]
 sock.sendto(msg, dest)
-
+#ready = select.select([sock], [], [], RTO)
 # Now read in data, send packets
 while True:
 # <<<<<<< HEAD
@@ -172,22 +173,24 @@ while True:
     ready = select.select([sock], [], [], RTO)
     if ready[0]:
         # result = sock.recvfrom(MTU)
-        result = ready[0].recv(MTU)
+        result = ready[0][0].recvfrom(MTU)
         ack_time = datetime.datetime.now()
         (data, addr) = result
+	log("data:" + str(data))
         try:
             decoded = json.loads(data)
 
             if decoded['syn']:
-                ack_numb = decoded['ack']-1
+                ack_num = decoded['ack']
                 log("Connection establishing")
 
                 log("unackepackets " + str(unacked_packets.items()))
                 #TODO: This occasionally throws key error
-                del unacked_packets[ack_numb]
+		log("syn ack:" + str(decoded['ack']))
+		log("SEQUENCE: " + str(SEQUENCE))
                 if decoded['ack'] == SEQUENCE:
-                    SEQUENCE += 1
                     calc_rto(unacked_packets[decoded['ack']][0], ack_time)
+		    del unacked_packets[ack_num]
                     send_next_packet()
 
             else:
@@ -213,6 +216,7 @@ while True:
 
                     # Try to send next packet; break if no more data
                     if (not send_next_packet()):
+			log("no more data")
                         break
 
                 # packet matching ACK not in unacked_packets ==> duplicate ACK

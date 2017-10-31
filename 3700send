@@ -83,8 +83,8 @@ def setup_connection():
     # Send first syn packet
     msg = json.dumps({"syn": True, "seq_num": SEQUENCE, "data": "", "fin": False, "ack": False})
     log("[SYN] " + str(SEQUENCE))
+    unacked_packets[SEQUENCE] = [datetime.datetime.now(), "", False]
     SEQUENCE += 1
-    unacked_packets[SEQUENCE+1] = [datetime.datetime.now(), ""]
     sock.sendto(msg, dest)
 
 
@@ -168,23 +168,23 @@ def send_next_packet():
         return True
 
 
-def fast_retransmit(ack_num):
+def fast_retransmit(seq_num):
     global cwnd, eff_wnd, ssthresh, unacked_packets, dup_acks_count, SEQUENCE
 
     # unacked_packets contains packets mapped to their SEQ number
     # if receiver sends duplicate ACKs for an ack_num, then need to resend packet with SEQUENCE=ack_num
     # if last packet and len < MSS, get the first (and only) unacked packet
-    packet = unacked_packets[ack_num]
+    packet = unacked_packets[seq_num]
 
-    msg = json.dumps({"seq_num": ack_num, "data": packet[1], "fin": False,
+    msg = json.dumps({"seq_num": seq_num, "data": packet[1], "fin": False,
                       "syn": False, "ack": False})
-    log("[retransmission] DATA packet " + str(ack_num))
+    log("[retransmission] DATA packet " + str(seq_num))
     eff_wnd -= 1
     if sock.sendto(msg, dest) < len(msg):
         log("[error] unable to fully send packet")
 
-    SEQUENCE = ack_num + len(packet[1])        # reset SEQUENCE to last missing packet
-    unacked_packets[ack_num][2] = True         # set retransmitted to True (exclude from RTT sampling)
+    SEQUENCE = seq_num + len(packet[1])        # reset SEQUENCE to last missing packet
+    unacked_packets[seq_num][2] = True         # set retransmitted to True (exclude from RTT sampling)
 
     # fast recovery
     cwnd = ssthresh / 2
@@ -245,9 +245,10 @@ while True:
             else:
                 # If there is an ack, process that ACK (duplicate? retransmit? send next packet?)
                 ack_num = decoded['ack']
+                seq_num = ack_num - MSS
 
                 # get the [sent_time, data, retransmitted] for the packet the ack_num is for
-                unacked_data = unacked_packets.get(ack_num-MSS, None)
+                unacked_data = unacked_packets.get(seq_num, None)
 		
                 log("[wnd] " + str(min(cwnd, adv_wnd)))
                 if eff_wnd < min(cwnd, adv_wnd):
@@ -261,7 +262,7 @@ while True:
 
                     # if unacked_data[0] is not 0:
                     calc_rto(unacked_data, ack_time)
-                    del unacked_packets[ack_num] # remove acked packet from unacked_packets
+                    del unacked_packets[seq_num] # remove acked packet from unacked_packets
 
                     if cwnd < ssthresh: # slow start
                         cwnd += 1
@@ -283,7 +284,7 @@ while True:
                         check_timeout()
                     else:
                         log("[dup ack] " + str(ack_num))
-                        fast_retransmit(ack_num) #TODO:This is a prob
+                        fast_retransmit(seq_num) #TODO:This is a prob
                         #  dup_acks_count = 0
 
 

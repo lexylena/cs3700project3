@@ -76,18 +76,23 @@ def calc_rto(sent, acked):
 # TODO: implement
 def retransmit_after_timeout(unacked):
     global cwnd, ssthresh, dup_acks_count, unacked_packets, SEQUENCE
-
-    ssthresh = cwnd / 2
-    cwnd = 1
-    dup_acks_count = 0
-    msg = json.dumps({"seq_num": (unacked[0] - len(unacked[1][1])),
-                      "data": unacked[1][1], "fin": False,
-                      "syn": False, "ack": False})
-    log("unacked items " + str(unacked_packets.items()))
-    SEQUENCE = unacked[0]
-    log("About to send " + str(msg))
-    if sock.sendto(msg, dest) < len(msg):
-        log("[error] unable to fully send packet")
+    if unacked[1][1] == "":
+        msg = json.dumps({"syn": True, "seq_num": SEQUENCE-1, "data": "", "fin": False, "ack": False})
+        log("About to send Syn " + str(SEQUENCE))
+        unacked_packets[SEQUENCE] = [datetime.datetime.now(), ""]
+        sock.sendto(msg, dest)
+    else:
+        ssthresh = cwnd / 2
+        cwnd = 1
+        dup_acks_count = 0
+        msg = json.dumps({"seq_num": (unacked[0] - len(unacked[1][1])),
+                          "data": unacked[1][1], "fin": False,
+                          "syn": False, "ack": False})
+        # log("unacked items " + str(unacked_packets.items()))
+        SEQUENCE = unacked[0]
+        # log("About to send " + str(msg))
+        if sock.sendto(msg, dest) < len(msg):
+            log("[error] unable to fully send packet")
 
 
 
@@ -151,7 +156,7 @@ def send_next_packet():
 
 def fast_retransmit(ack_num):
     global cwnd, ssthresh, unacked_packets, dup_acks_count, SEQUENCE
-    log("uackedPackets " + str(unacked_packets) + " ack_num " + str(ack_num))
+    # log("uackedPackets " + str(unacked_packets) + " ack_num " + str(ack_num))
     packet = unacked_packets[ack_num] #TODO: This throws a keyerror off by 1000 ie ack_num does not include the length in the unacked_packets dict, but the number passed to the func does
     msg = json.dumps({"seq_num": ack_num, "data": packet[1], "fin": False,
                       "syn": False, "ack": False})
@@ -196,7 +201,7 @@ while True:
                 ack_num = decoded['ack']
                 log("Connection establishing")
 
-                log("unackepackets " + str(unacked_packets.items()))
+                # log("unackepackets " + str(unacked_packets.items()))
                 #TODO: This occasionally throws key error
                 log("syn ack:" + str(decoded['ack']))
                 log("SEQUENCE: " + str(SEQUENCE))
@@ -256,8 +261,9 @@ while True:
             log("[recv corrupt packet]")
     else:
         # TODO: implement
+        log("timeout")
         items = unacked_packets.items()
-        if len(items) != 0:
+        if len(items) > 0:
             retransmit_after_timeout(items[0])
         else:
             break

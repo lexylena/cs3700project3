@@ -74,8 +74,22 @@ def calc_rto(sent, acked):
     RTO = 2 * RTT
 
 # TODO: implement
-def retransmit_after_timeout():
-    return 0
+def retransmit_after_timeout(unacked):
+    global cwnd, ssthresh, dup_acks_count, unacked_packets, SEQUENCE
+
+    ssthresh = cwnd / 2
+    cwnd = 1
+    dup_acks_count = 0
+    msg = json.dumps({"seq_num": (unacked[0] - len(unacked[1][1])),
+                      "data": unacked[1][1], "fin": False,
+                      "syn": False, "ack": False})
+    log("unacked items " + str(unacked_packets.items()))
+    SEQUENCE = unacked[0]
+    log("About to send " + str(msg))
+    if sock.sendto(msg, dest) < len(msg):
+        log("[error] unable to fully send packet")
+
+
 
 #TODO: change implementation to call retransmit_after_timeout
 # check timeouts for unacked packets
@@ -84,28 +98,26 @@ def retransmit_after_timeout():
 def check_timeout():
     global RTO, cwnd, ssthresh, dup_acks_count, unacked_packets, SEQUENCE
     # first entry in unacked_packets was sent first, so its timeout will occur first
-    unacked = unacked_packets.items()[0]
-    diff = datetime.datetime.now() - unacked[1][0]
-    # log("check_timeout")
-    # log("diff = " +  str(diff))
-    # log("RTO = " + str(RTO))
-    if diff.seconds + diff.microseconds/1000000 >= RTO:
-        log("[timeout] ACK " + str(unacked[0])) # timed out waiting for ack from receiver
-        ssthresh = cwnd / 2
-        cwnd = 1
-        dup_acks_count = 0
-        msg = json.dumps({"seq_num": (unacked[0] - len(unacked[1][1])) ,
-                          "data": unacked[1][1], "fin": False,
-                          "syn": False, "ack": False})
-        log("unacked items " + str(unacked_packets.items()))
-        SEQUENCE = unacked[0]
-        log("About to send " + str(msg))
-        if sock.sendto(msg, dest) < len(msg):
-            log("[error] unable to fully send packet")
-        return True
+    items = unacked_packets.items()
+    unacked = None
+    for ii in items:
+        if items[ii][0] != 0:
+            unacked = items[ii]
+            break
 
-    else:
+    if unacked is None:
         return False
+    else:
+        diff = datetime.datetime.now() - unacked[1][0]
+        # log("check_timeout")
+        # log("diff = " +  str(diff))
+        # log("RTO = " + str(RTO))
+        if diff.seconds + diff.microseconds/1000000 >= RTO:
+            log("[timeout] ACK " + str(unacked[0])) # timed out waiting for ack from receiver
+            retransmit_after_timeout(unacked)
+            return True
+        else:
+            return False
 
 def send_next_packet():
     global SEQUENCE, unacked_packets, eff_wnd
@@ -176,7 +188,7 @@ while True:
         result = ready[0][0].recvfrom(MTU)
         ack_time = datetime.datetime.now()
         (data, addr) = result
-	log("data:" + str(data))
+        log("data:" + str(data))
         try:
             decoded = json.loads(data)
 
@@ -186,11 +198,11 @@ while True:
 
                 log("unackepackets " + str(unacked_packets.items()))
                 #TODO: This occasionally throws key error
-		log("syn ack:" + str(decoded['ack']))
-		log("SEQUENCE: " + str(SEQUENCE))
+                log("syn ack:" + str(decoded['ack']))
+                log("SEQUENCE: " + str(SEQUENCE))
                 if decoded['ack'] == SEQUENCE:
                     calc_rto(unacked_packets[decoded['ack']][0], ack_time)
-		    del unacked_packets[ack_num]
+                    del unacked_packets[ack_num]
                     send_next_packet()
 
             else:
@@ -204,7 +216,7 @@ while True:
 
                     # update cwnd and RTO if not retransmitted packet ACK
                     # (retransmitted packets should have value set to 0)
-                    if sent_time is not 0:
+                    if sent_time[0] is not 0:
                         calc_rto(unacked_packets[ack_num][0], ack_time)
                         del unacked_packets[ack_num] # remove acked packet from unacked_packets
 
@@ -216,7 +228,7 @@ while True:
 
                     # Try to send next packet; break if no more data
                     if (not send_next_packet()):
-			log("no more data")
+                        log("no more data")
                         break
 
                 # packet matching ACK not in unacked_packets ==> duplicate ACK
@@ -244,7 +256,11 @@ while True:
             log("[recv corrupt packet]")
     else:
         # TODO: implement
-        retransmit_after_timeout()
+        items = unacked_packets.items()
+        if len(items) != 0:
+            retransmit_after_timeout(items[0])
+        else:
+            break
 
 #TODO: implement connection tear down
 sock.sendto(json.dumps({"fin": True, "data": "", "seq_num": SEQUENCE, "ack": False, "syn": False}), dest)

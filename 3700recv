@@ -67,7 +67,7 @@ while True:
             expected_sequence += len(decoded['data'])
 
             # log("expected next sequence" + str(expected_sequence))
-            
+
             msg = json.dumps({"ack": decoded['seq_num'] + len(decoded['data']), "syn": False})
             # log("About to send " + msg)
             if sock.sendto(msg, addr) < len(msg):

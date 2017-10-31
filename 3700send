@@ -232,14 +232,14 @@ while True:
             decoded = json.loads(data)
 
             if decoded['syn'] and decoded['ack'] == SEQUENCE:
-                ack_num = decoded['ack']
-                log("[recv SYN/ACK] " + str(ack_num) + " : Connection establishing")
+                syn = SEQUENCE - 1 # sequence # of syn packet
+                log("[recv SYN/ACK] " + str(SEQUENCE) + " : Connection establishing")
                 synced = True
 
-                syn_rtt = ack_time - unacked_packets[decoded['ack']][0]
+                syn_rtt = ack_time - unacked_packets[syn][0]
                 RTT = syn_rtt.seconds + syn_rtt.microseconds/float(1000000)
                 RTO = 2 * RTT
-                del unacked_packets[ack_num]
+                del unacked_packets[syn]
                 send_next_packet()
 
             else:

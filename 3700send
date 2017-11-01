@@ -18,14 +18,14 @@ alpha = 0.875
 MTU = 1500
 MSS = 1000 #1500 - 2*sys.getsizeof(int()) - 3*sys.getsizeof(bool())   # MTU - header fields
 
-RTT = 1  # TODO: set initial value during connection setup
-RTO = 3     # initially 3 seconds, recalculated after first RTT
+RTT = 0.25  # TODO: set initial value during connection setup
+RTO = 0.5     # initially 3 seconds, recalculated after first RTT
 
 SEQUENCE = randint(0, 10)
 ACK = None # last received ACK number
 
 cwnd = 1                    # congestion window
-adv_wnd = 5                # receiver advertised window (TODO: set in connection setup)
+adv_wnd = 10                # receiver advertised window (TODO: set in connection setup)
 ssthresh = adv_wnd          # threshold size (used to update cwnd)
 eff_wnd = min(cwnd, adv_wnd)
 
@@ -90,13 +90,14 @@ def setup_connection():
 
 # retransmit the given packet
 def retransmit_after_timeout(unacked):
-    global cwnd, eff_wnd, ssthresh, dup_acks_count, unacked_packets, SEQUENCE
+    global cwnd, eff_wnd, ssthresh, dup_acks_count, unacked_packets, SEQUENCE, RTO
     # if unacked[1][1] == "":
     #     msg = json.dumps({"syn": True, "seq_num": SEQUENCE-1, "data": "", "fin": False, "ack": False})
     #     log("[retransmission] SYN " + str(SEQUENCE-1))
     #     unacked_packets[SEQUENCE] = [datetime.datetime.now(), ""]
     #     sock.sendto(msg, dest)
     # else:
+    RTO += 0.01
     ssthresh = cwnd / 2
     cwnd = 1
     eff_wnd = min(cwnd, adv_wnd)
@@ -287,8 +288,10 @@ while True:
 
                     if cwnd < ssthresh: # slow start
                         cwnd += 1
+			log("slow start cwnd  " + str(cwnd))
                     else: # congestion avoidance
                         cwnd += 1 / cwnd
+			log("conn avoid cwnd  " + str(cwnd))
 
 
                     # Try to send next packet; break if no more data

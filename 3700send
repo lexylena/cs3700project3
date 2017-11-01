@@ -12,16 +12,16 @@ import time
 
 alpha = 0.875
 MTU = 1500
-MSS = 1500 - 2*sys.getsizeof(int()) - 3*sys.getsizeof(bool()) - 20   # MTU - header fields
+MSS = 1500 - 2*sys.getsizeof(int()) - 20   # MTU - header fields
 
 RTT = 1
 RTO = 1
 
-SEQUENCE = randint(0, 10)
+SEQUENCE = randint(0, 2^32 - 1)
 syn_num = SEQUENCE
 
 cwnd = 1                    # congestion window
-adv_wnd = 50                # receiver advertised window (TODO: set in connection setup)
+adv_wnd = 0                # receiver advertised window (TODO: set in connection setup)
 ssthresh = adv_wnd          # threshold size (used to update cwnd)
 eff_wnd = 0                 # number of packets currently out
 
@@ -50,11 +50,27 @@ def log(string):
 '''
 Sender Packet Format:
     - seq_num
-    - ack
-    - syn
-    - fin
+    - flags
+        - 1 = syn, 2 = fin, 4 = ack (add to combine flags, ex: 5 = syn/ack)
     - data
 '''
+
+# wrap sequence numbers
+def increase_seq(num):
+    global SEQUENCE
+    if SEQUENCE + num > 2^32 - 1:
+        wrap = 2^32 - 1 - SEQUENCE
+        SEQUENCE = num - wrap
+    else:
+        SEQUENCE += num
+
+
+# get corresponding sequence number for ack
+def wrap_ack(ack, num):
+    if ack - num < 0:
+        return 2^32-1 - (ack - num) * -1
+    else:
+        return ack - num
 
 # recalculate RTO given the times a packet was sent and when its ACK was received
 # unacked_data is [datetime sent_time, string data, bool retransmitted]
@@ -75,10 +91,10 @@ def setup_connection():
     global SEQUENCE, unacked_packets, RTO
 
     # Send first syn packet
-    msg = json.dumps({"syn": True, "seq_num": SEQUENCE, "data": "", "fin": False, "ack": False})
+    msg = json.dumps({"seq_num": SEQUENCE, "flags": 1, "data": ""})
     log("[send syn] " + str(SEQUENCE) + " (" + str(1) + ")")
     unacked_packets[SEQUENCE] = [datetime.datetime.now(), "", False]
-    SEQUENCE += 1
+    increase_seq(1)
     sock.sendto(msg, dest)
 
 
@@ -90,8 +106,7 @@ def retransmit_after_timeout(unacked):
     cwnd = 1
 
     log("[send data] " + str(unacked[0]) + " (" + str(len(unacked[1][1])) + ")")
-    msg = json.dumps({"seq_num": unacked[0], "data": unacked[1][1],
-                      "fin": False, "syn": False, "ack": False})
+    msg = json.dumps({"seq_num": unacked[0], "data": unacked[1][1], "flags": 0})
 
     unacked_packets[unacked[0]][2] = True # set retransmitted to True
 
@@ -132,20 +147,19 @@ def send_next_packet():
             data = sys.stdin.read(MSS)
 
         if (len(data) > 0):
-            msg = json.dumps({"seq_num": SEQUENCE, "data": data, "fin": False,
-                              "syn": False, "ack": False})
-
+            msg = json.dumps({"seq_num": SEQUENCE, "data": data, "flags": 0})
+            log("[send data] " + str(SEQUENCE) + " (" + str(len(data)) + ")")
             if not retransmit:
                 # add packet to unacked_packets
                 unacked_packets[SEQUENCE] = [datetime.datetime.now(), data, False]
 
-            SEQUENCE += len(data)
+            increase_seq(len(data))
             eff_wnd+=1
 
             if sock.sendto(msg, dest) < len(msg):
                 log("[error] unable to fully send packet")
-            else:
-                log("[send data] " + str(SEQUENCE - len(data)) + " (" + str(len(data)) + ")")
+
+
         else:
             return False
 
@@ -157,14 +171,14 @@ def teardown_connection(attempts):
 
     if attempts < 3:
         log("[send fin] " + str(SEQUENCE))
-        sock.sendto(json.dumps({"fin": True, "data": "", "seq_num": SEQUENCE, "ack": False, "syn": False}), dest)
+        sock.sendto(json.dumps({"data": "", "seq_num": SEQUENCE, "flags": 2}), dest)
         ready = select.select([sock], [], [], RTO)
         if ready[0]:
             result = ready[0][0].recvfrom(MTU)
             (data, addr) = result
             try:
                 decoded = json.loads(data)
-                if decoded['fin'] and decoded['ack'] == SEQUENCE+1:
+                if decoded['flags'] == 6 and decoded['ack'] == SEQUENCE+1:
                     log("[recv fin/ack] " + str(decoded['ack']))
                     log("[completed]")
                     sys.exit(0)
@@ -201,7 +215,7 @@ while True:
             decoded = json.loads(data)
 
             # SYN packet
-            if decoded['syn'] and decoded['ack'] == SEQUENCE:
+            if decoded['flags'] == 5 and decoded['ack'] == SEQUENCE:
                 syn = SEQUENCE - 1 # sequence num of syn packet
                 synced = True
                 log("[recv syn/ack] " + str(SEQUENCE) + " : Connection establishing")
@@ -221,7 +235,7 @@ while True:
                 # the difference between the ack num and its corresponding seq num is either MSS or,
                 # in the case that it is the last data packet sent and its length < MSS,
                 # difference is ack num - len(data)
-                seq_num = ack_num - MSS
+                seq_num = wrap_ack(ack_num, MSS)
 
                 # get the [sent_time, data, retransmitted] for the packet the ack_num is for
                 unacked_data = unacked_packets.get(seq_num, None)
@@ -230,7 +244,7 @@ while True:
                 all_unacked = unacked_packets.items()
                 len = len(all_unacked)
                 if not unacked_data and len > 0:
-                    if all_unacked[len - 1][0] + len(all_unacked[len - 1][1][1]) == ack_num:
+                    if wrap_ack(ack_num, len(all_unacked[len - 1][1][1])) == all_unacked[len - 1][0]:
                         seq_num = all_unacked[len - 1][0]
                         unacked_data = unacked_packets[seq_num]
 
@@ -269,7 +283,7 @@ while True:
     else:
         # timed out waiting for a SYN/ACK packet
         if not synced:
-            SEQUENCE -= 1
+            increase_seq(-1)
             setup_connection()
 
         # timed out waiting for data ACK packet

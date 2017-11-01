@@ -76,7 +76,7 @@ def setup_connection():
 
     # Send first syn packet
     msg = json.dumps({"syn": True, "seq_num": SEQUENCE, "data": "", "fin": False, "ack": False})
-    log("[SYN] " + str(SEQUENCE))
+    log("[send syn] " + str(SEQUENCE) + " (" + str(1) + ")")
     unacked_packets[SEQUENCE] = [datetime.datetime.now(), "", False]
     SEQUENCE += 1
     sock.sendto(msg, dest)
@@ -89,7 +89,7 @@ def retransmit_after_timeout(unacked):
     ssthresh = cwnd / 2
     cwnd = 1
 
-    log("[retransmission (timeout)] " + str(unacked[0]))
+    log("[send data] " + str(unacked[0]) + " (" + str(len(unacked[1][1])) + ")")
     msg = json.dumps({"seq_num": unacked[0], "data": unacked[1][1],
                       "fin": False, "syn": False, "ack": False})
 
@@ -156,7 +156,7 @@ def teardown_connection(attempts):
     global unacked_packets, eff_wnd, SEQUENCE, RTO
 
     if attempts < 3:
-        log("[teardown] SEQ " + str(SEQUENCE))
+        log("[send fin] " + str(SEQUENCE))
         sock.sendto(json.dumps({"fin": True, "data": "", "seq_num": SEQUENCE, "ack": False, "syn": False}), dest)
         ready = select.select([sock], [], [], RTO)
         if ready[0]:
@@ -164,9 +164,9 @@ def teardown_connection(attempts):
             (data, addr) = result
             try:
                 decoded = json.loads(data)
-                log("[teardown sender received] " + str(decoded))
                 if decoded['fin'] and decoded['ack'] == SEQUENCE+1:
-                    log("[fin/ack] " + str(decoded['ack']))
+                    log("[recv fin/ack] " + str(decoded['ack']))
+                    log("[completed]")
                     sys.exit(0)
                 else:
                     log("[fin/ack error] " + str(decoded['ack']))
@@ -177,8 +177,8 @@ def teardown_connection(attempts):
         else:
             teardown_connection(attempts+1)
     else:
-        log("sender exiting")
-        sys.exit(1)
+        log("[completed]")
+        sys.exit(0)
 
 
 
@@ -204,7 +204,7 @@ while True:
             if decoded['syn'] and decoded['ack'] == SEQUENCE:
                 syn = SEQUENCE - 1 # sequence num of syn packet
                 synced = True
-                log("[recv SYN/ACK] " + str(SEQUENCE) + " : Connection establishing")
+                log("[recv syn/ack] " + str(SEQUENCE) + " : Connection establishing")
 
                 # calculate initial RTT and new RTO
                 calc_rto(unacked_packets[syn], ack_time)
@@ -261,17 +261,15 @@ while True:
                 else:
                     check_timeout()
 
-        except ('''ValueError, KeyError, TypeError'''):
+        except (ValueError, KeyError, TypeError):
             log("[recv corrupt packet]")
             # window slides forward
             eff_wnd-=1
 
     else:
-        log("[timeout]")
         # timed out waiting for a SYN/ACK packet
         if not synced:
             SEQUENCE -= 1
-            log("[retransmission] SYN")
             setup_connection()
 
         # timed out waiting for data ACK packet

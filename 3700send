@@ -21,7 +21,7 @@ SEQUENCE = randint(0, 2^32 - 1)
 syn_num = SEQUENCE
 
 cwnd = 1                    # congestion window
-adv_wnd = 0                # receiver advertised window (TODO: set in connection setup)
+adv_wnd = 20                # receiver advertised window (TODO: set in connection setup)
 ssthresh = adv_wnd          # threshold size (used to update cwnd)
 eff_wnd = 0                 # number of packets currently out
 
@@ -242,10 +242,10 @@ while True:
 
                 # check if last packet unacked has data length < MSS, and if that's matching seq num
                 all_unacked = unacked_packets.items()
-                len = len(all_unacked)
-                if not unacked_data and len > 0:
-                    if wrap_ack(ack_num, len(all_unacked[len - 1][1][1])) == all_unacked[len - 1][0]:
-                        seq_num = all_unacked[len - 1][0]
+                length = len(all_unacked)
+                if not unacked_data and length > 0:
+                    if wrap_ack(ack_num, len(all_unacked[length - 1][1][1])) == all_unacked[length - 1][0]:
+                        seq_num = all_unacked[length - 1][0]
                         unacked_data = unacked_packets[seq_num]
 
 

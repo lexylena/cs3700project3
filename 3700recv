@@ -84,7 +84,7 @@ while True:
                 # record syn_num to be used for identifying duplicate data packets
                 syn_num = decoded['seq_num'] + 1
                 # increment expected sequence
-                expected_sequence = increase_seq(expected_sequence, decoded['seq_num'] + 1)
+                expected_sequence = syn_num#increase_seq(expected_sequence, decoded['seq_num'] + 1)
                 # send SYN/ACK
                 msg = json.dumps({"ack": decoded['seq_num']+1, "flags": 5})
                 sock.sendto(msg, addr)

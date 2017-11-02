@@ -23,19 +23,6 @@ UDP_PORT = 0
 
 # Expected sequence number
 expected_sequence = None
-wrapped = False # if sequence numbers have wrapped around yet
-
-# wrap sequence numbers
-def increase_seq(seq, num):
-    global wrapped
-    if seq + num > 2^32 - 1:
-        wrap = 2^32 - 1 - seq
-        wrapped = True
-        return num - wrap
-    else:
-        return seq + num
-
-
 
 # print data that comes next to stdout if it was buffered
 def print_buffered_packets(seq):
@@ -84,7 +71,7 @@ while True:
                 # record syn_num to be used for identifying duplicate data packets
                 syn_num = decoded['seq_num'] + 1
                 # increment expected sequence
-                expected_sequence = syn_num#increase_seq(expected_sequence, decoded['seq_num'] + 1)
+                expected_sequence = syn_num
                 # send SYN/ACK
                 msg = json.dumps({"ack": decoded['seq_num']+1, "flags": 5})
                 sock.sendto(msg, addr)
@@ -106,7 +93,7 @@ while True:
 
                     # print data to stdout
                     sys.stdout.write(decoded['data'])
-                    expected_sequence = increase_seq(expected_sequence, len(decoded['data']))
+                    expected_sequence += len(decoded['data'])
 
                     # add packet to buffer with value 1 to mark as already accepted and printed to stdout
                     buffer[decoded['seq_num']] = 1
@@ -122,7 +109,7 @@ while True:
 
 
                 # received data out-of-order
-                elif decoded['seq_num'] > expected_sequence and not wrapped:
+                elif decoded['seq_num'] > expected_sequence:
                     # buffer data until received packets that come before it
                     log("[recv data] " + str(decoded['seq_num']) + " (" + str(len(decoded['data'])) + ") ACCEPTED (out-of-order)")
                     buffer[decoded['seq_num']] = decoded['data']

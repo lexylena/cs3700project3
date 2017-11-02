@@ -228,10 +228,10 @@ while True:
 
                 # check if last packet unacked has data length < MSS, and if that's matching seq num
                 all_unacked = unacked_packets.items()
-                len = len(all_unacked)
-                if not unacked_data and len > 0:
-                    if all_unacked[len - 1][0] + len(all_unacked[len - 1][1][1]) == ack_num:
-                        seq_num = all_unacked[len - 1][0]
+                length = len(all_unacked)
+                if not unacked_data and length > 0:
+                    if all_unacked[length - 1][0] + len(all_unacked[length - 1][1][1]) == ack_num:
+                        seq_num = all_unacked[length - 1][0]
                         unacked_data = unacked_packets[seq_num]
 
 

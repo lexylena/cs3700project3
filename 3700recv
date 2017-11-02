@@ -11,7 +11,7 @@ def log(string):
     sys.stderr.write(datetime.datetime.now().strftime("%H:%M:%S.%f") + " " + string + "\n")
 
 MTU = 1500
-MSS = 1500 - 2*sys.getsizeof(int()) - 3*sys.getsizeof(bool()) - 20   # MTU - header fields
+MSS = 1500 - 2*sys.getsizeof(int()) - 20   # MTU - header fields
 
 TIMEOUT = 30
 syn_num = None  # first sequence number
@@ -23,6 +23,19 @@ UDP_PORT = 0
 
 # Expected sequence number
 expected_sequence = None
+wrapped = False # if sequence numbers have wrapped around yet
+
+# wrap sequence numbers
+def increase_seq(seq, num):
+    global wrapped
+    if seq + num > 2^32 - 1:
+        wrap = 2^32 - 1 - seq
+        wrapped = True
+        return num - wrap
+    else:
+        return seq + num
+
+
 
 # print data that comes next to stdout if it was buffered
 def print_buffered_packets(seq):
@@ -67,20 +80,20 @@ while True:
             decoded = json.loads(data)
 
             # SYN packet
-            if (decoded['syn']):
+            if (decoded['flags'] == 1):
                 # record syn_num to be used for identifying duplicate data packets
                 syn_num = decoded['seq_num'] + 1
                 # increment expected sequence
-                expected_sequence = decoded['seq_num'] + 1
+                expected_sequence = increase_seq(expected_sequence, decoded['seq_num'] + 1)
                 # send SYN/ACK
-                msg = json.dumps({"syn": True, "ack": decoded['seq_num']+1, "fin": False})
+                msg = json.dumps({"ack": decoded['seq_num']+1, "flags": 5})
                 sock.sendto(msg, addr)
 
             # FIN packet
-            if (decoded['fin'] and decoded['seq_num'] == expected_sequence):
+            if (decoded['flags'] == 2 and decoded['seq_num'] == expected_sequence):
                 log("[completed] " + str(decoded))
                 # send FIN/ACK and close connection
-                msg = json.dumps({"fin": True, "ack": expected_sequence + 1})
+                msg = json.dumps({"ack": expected_sequence + 1, "flags": 6})
                 sock.sendto(msg, addr)
                 sys.exit(0)
 
@@ -93,14 +106,14 @@ while True:
 
                     # print data to stdout
                     sys.stdout.write(decoded['data'])
-                    expected_sequence += len(decoded['data'])
+                    expected_sequence = increase_seq(expected_sequence, len(decoded['data']))
 
                     # add packet to buffer with value 1 to mark as already accepted and printed to stdout
                     buffer[decoded['seq_num']] = 1
 
                     # send ACK for received packet
                     log("[send ack] " + str(decoded['seq_num'] + len(decoded['data'])))
-                    msg = json.dumps({"ack": decoded['seq_num'] + len(decoded['data']), "syn": False, "fin": False})
+                    msg = json.dumps({"ack": decoded['seq_num'] + len(decoded['data']), "flags": 4})
                     if sock.sendto(msg, addr) < len(msg):
                         log("[error] unable to fully send packet")
 
@@ -109,13 +122,13 @@ while True:
 
 
                 # received data out-of-order
-                elif decoded['seq_num'] > expected_sequence:
+                elif decoded['seq_num'] > expected_sequence and not wrapped:
                     # buffer data until received packets that come before it
                     log("[recv data] " + str(decoded['seq_num']) + " (" + str(len(decoded['data'])) + ") ACCEPTED (out-of-order)")
                     buffer[decoded['seq_num']] = decoded['data']
 
                     # send ACK to sender
-                    msg = json.dumps({"ack": decoded['seq_num'] + len(decoded['data']), "syn": False})
+                    msg = json.dumps({"ack": decoded['seq_num'] + len(decoded['data']), "flags": 4})
                     log("[send ack] " + str(decoded['seq_num'] + len(decoded['data'])))
                     if sock.sendto(msg, addr) < len(msg):
                         log("[error] unable to fully send packet")
@@ -125,7 +138,7 @@ while True:
                     log("[recv data] " + str(decoded['seq_num']) + " (" + str(len(decoded['data'])) + ") IGNORED")
 
                     # resend ACK
-                    msg = json.dumps({"ack": decoded['seq_num'] + len(decoded['data']), "syn": False, "fin": False})
+                    msg = json.dumps({"ack": decoded['seq_num'] + len(decoded['data']), "flags": 4})
                     if sock.sendto(msg, addr) < len(msg):  # just resend ACK, ignore data
                         log("[error] unable to fully send packet")
 

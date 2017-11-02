@@ -17,7 +17,7 @@ MSS = 1500 - 2*sys.getsizeof(int()) - 20   # MTU - header fields
 RTT = 1
 RTO = 1
 
-SEQUENCE = randint(0, 2^32 - 1)
+SEQUENCE = randint(0, 2^20)
 syn_num = SEQUENCE
 
 cwnd = 1                    # congestion window

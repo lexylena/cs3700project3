@@ -30,7 +30,7 @@ eff_wnd = 0                 # number of packets currently out
 #   - each time packet sent, add (seq#, [sent, data, retransmitted])
 #   - when ACK received, record time received, calc_rto(unacked_packets[ack#], time received), remove ack# from dict
 unacked_packets = OrderedDict([])
-synced = True # has connection been setup successfully
+synced = False # has connection been setup successfully
 
 # Bind to localhost and an ephemeral port
 IP_PORT = sys.argv[1]
